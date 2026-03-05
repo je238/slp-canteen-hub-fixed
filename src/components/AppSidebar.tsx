@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAppContext } from "@/contexts/AppContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useCanteens } from "@/hooks/useSupabaseData";
 import {
   LayoutDashboard,
@@ -15,27 +16,47 @@ import {
   X,
   Building2,
   ClipboardCheck,
+  Shield,
+  Key,
+  LogOut,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
 
-const navItems = [
-  { path: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { path: "/pos", icon: ShoppingCart, label: "POS Billing" },
-  { path: "/inventory", icon: Package, label: "Inventory" },
-  { path: "/recipes", icon: ChefHat, label: "Recipes" },
-  { path: "/purchases", icon: Truck, label: "Purchases" },
-  { path: "/invoice-scan", icon: ScanLine, label: "Invoice Scan" },
-  { path: "/expenses", icon: Wallet, label: "Expenses" },
-  { path: "/stock-audit", icon: ClipboardCheck, label: "Stock Audit" },
-  { path: "/staff", icon: Users, label: "Staff" },
-  { path: "/reports", icon: BarChart3, label: "Reports" },
+const allNavItems = [
+  { path: "/", icon: LayoutDashboard, label: "Dashboard", minRole: "manager" as const },
+  { path: "/pos", icon: ShoppingCart, label: "POS Billing", minRole: "cashier" as const },
+  { path: "/inventory", icon: Package, label: "Inventory", minRole: "manager" as const },
+  { path: "/recipes", icon: ChefHat, label: "Recipes", minRole: "manager" as const },
+  { path: "/purchases", icon: Truck, label: "Purchases", minRole: "manager" as const },
+  { path: "/invoice-scan", icon: ScanLine, label: "Invoice Scan", minRole: "manager" as const },
+  { path: "/expenses", icon: Wallet, label: "Expenses", minRole: "manager" as const },
+  { path: "/stock-audit", icon: ClipboardCheck, label: "Stock Audit", minRole: "manager" as const },
+  { path: "/staff", icon: Users, label: "Staff", minRole: "manager" as const },
+  { path: "/reports", icon: BarChart3, label: "Reports", minRole: "manager" as const },
+  { path: "/users", icon: Shield, label: "User Management", minRole: "owner" as const },
+  { path: "/api-keys", icon: Key, label: "API Keys", minRole: "owner" as const },
 ];
+
+const ROLE_RANK: Record<string, number> = { owner: 3, manager: 2, cashier: 1 };
 
 export default function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { selectedCanteen, setSelectedCanteen, sidebarOpen, setSidebarOpen } = useAppContext();
+  const { roleData, user, signOut } = useAuth();
   const { data: canteens } = useCanteens();
+
+  const userRole = roleData?.role || "cashier";
+  const navItems = allNavItems.filter(
+    item => ROLE_RANK[userRole] >= ROLE_RANK[item.minRole]
+  );
+
+  const handleSignOut = async () => {
+    await signOut();
+    toast.success("Signed out");
+    navigate("/login");
+  };
 
   return (
     <>
@@ -63,19 +84,22 @@ export default function AppSidebar() {
           </button>
         </div>
 
-        <div className="px-4 py-3">
-          <Select value={selectedCanteen} onValueChange={setSelectedCanteen}>
-            <SelectTrigger className="bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground text-xs h-9">
-              <SelectValue placeholder="Select canteen" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Canteens</SelectItem>
-              {canteens?.map((c: any) => (
-                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* Canteen selector — hide for cashiers (auto-assigned) */}
+        {userRole !== "cashier" && (
+          <div className="px-4 py-3">
+            <Select value={selectedCanteen} onValueChange={setSelectedCanteen}>
+              <SelectTrigger className="bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground text-xs h-9">
+                <SelectValue placeholder="Select canteen" />
+              </SelectTrigger>
+              <SelectContent>
+                {userRole === "owner" && <SelectItem value="all">All Canteens</SelectItem>}
+                {canteens?.map((c: any) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         <nav className="flex-1 px-3 py-2 overflow-y-auto space-y-0.5">
           {navItems.map((item) => {
@@ -97,14 +121,23 @@ export default function AppSidebar() {
           })}
         </nav>
 
-        <div className="px-4 py-3 border-t border-sidebar-border">
+        {/* User info + sign out */}
+        <div className="px-4 py-3 border-t border-sidebar-border space-y-2">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-full bg-sidebar-accent flex items-center justify-center text-xs font-bold text-sidebar-accent-foreground">SA</div>
-            <div>
-              <p className="text-xs font-medium text-sidebar-accent-foreground">Super Admin</p>
-              <p className="text-[10px] text-sidebar-foreground">Owner</p>
+            <div className="w-7 h-7 rounded-full bg-sidebar-accent flex items-center justify-center text-xs font-bold text-sidebar-accent-foreground">
+              {user?.email?.[0]?.toUpperCase() || "?"}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-sidebar-accent-foreground truncate">{user?.email}</p>
+              <p className="text-[10px] text-sidebar-foreground capitalize">{userRole}</p>
             </div>
           </div>
+          <button
+            onClick={handleSignOut}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-sidebar-foreground hover:bg-sidebar-accent hover:text-destructive transition-colors"
+          >
+            <LogOut className="w-3.5 h-3.5" /> Sign out
+          </button>
         </div>
       </aside>
     </>
@@ -119,3 +152,4 @@ export function MobileMenuButton() {
     </button>
   );
 }
+
