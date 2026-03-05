@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 20% 97%;
+    --foreground: 220 30% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 30% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 30% 10%;
+
+    --primary: 220 60% 20%;
+    --primary-foreground: 40 100% 97%;
+
+    --secondary: 220 15% 92%;
+    --secondary-foreground: 220 30% 15%;
+
+    --muted: 220 15% 94%;
+    --muted-foreground: 220 10% 45%;
+
+    --accent: 35 92% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 15% 88%;
+    --input: 220 15% 88%;
+    --ring: 35 92% 50%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 220 40% 13%;
+    --sidebar-foreground: 220 15% 80%;
+    --sidebar-primary: 35 92% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 35% 18%;
+    --sidebar-accent-foreground: 220 15% 90%;
+    --sidebar-border: 220 30% 20%;
+    --sidebar-ring: 35 92% 50%;
+
+    /* Custom tokens */
+    --success: 152 60% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 210 80% 52%;
+    --info-foreground: 0 0% 100%;
+
+    --kpi-1: 220 60% 20%;
+    --kpi-2: 35 92% 50%;
+    --kpi-3: 152 60% 40%;
+    --kpi-4: 0 72% 51%;
+
+    --gradient-sidebar: linear-gradient(180deg, hsl(220 40% 13%), hsl(220 45% 8%));
+  }
+
+  .dark {
+    --background: 220 30% 6%;
+    --foreground: 220 15% 90%;
+
+    --card: 220 30% 10%;
+    --card-foreground: 220 15% 90%;
+
+    --popover: 220 30% 10%;
+    --popover-foreground: 220 15% 90%;
+
+    --primary: 35 92% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 25% 15%;
+    --secondary-foreground: 220 15% 90%;
+
+    --muted: 220 25% 15%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 35 92% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 25% 18%;
+    --input: 220 25% 18%;
+    --ring: 35 92% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+@layer utilities {
+  .sidebar-gradient {
+    background: var(--gradient-sidebar);
+  }
+}
