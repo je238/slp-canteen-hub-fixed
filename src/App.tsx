@@ -22,6 +22,7 @@ import UserManagementPage from "./pages/UserManagementPage";
 import ApiKeysPage from "./pages/ApiKeysPage";
 import NotFound from "./pages/NotFound";
 import PurchaseOrderPage from "./pages/PurchaseOrderPage";
+import DailyReportPage from "./pages/DailyReportPage";
 import ActivityLogPage from "./pages/ActivityLogPage";
 import CanteenPage from "./pages/CanteenPage";
 
@@ -90,6 +91,7 @@ const App = () => (
                 } />
 
                 <Route path="/purchase-orders" element={<PurchaseOrderPage />} />
+                <Route path="/daily-report" element={<DailyReportPage />} />
                 <Route path="/activity" element={<ActivityLogPage />} />
                 <Route path="/canteens" element={<CanteenPage />} />
                 <Route path="*" element={<NotFound />} />
