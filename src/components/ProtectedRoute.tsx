@@ -7,15 +7,12 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, minRole }: ProtectedRouteProps) {
-  const { session, roleData, loading } = useAuth();
+  const { session, loading } = useAuth();
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="space-y-3 text-center">
-          <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm text-muted-foreground">Loading...</p>
-        </div>
+        <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto" />
       </div>
     );
   }

@@ -21,42 +21,6 @@ interface AuthContextType {
   canAccessCanteen: (canteenId: string) => boolean;
 }
 
-git add .
-git commit -m "fix all pages showing and role fallback"
-git push
- 
-
-
-
-
-
-
-
-
-cat > src/contexts/AuthContext.tsx << 'ENDOFFILE'
-import React, { createContext, useContext, useEffect, useState } from "react";
-import { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
-
-export type UserRole = "owner" | "manager" | "cashier";
-
-interface UserRoleData {
-  role: UserRole;
-  canteen_id: string | null;
-}
-
-interface AuthContextType {
-  session: Session | null;
-  user: User | null;
-  roleData: UserRoleData | null;
-  loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signOut: () => Promise<void>;
-  isOwner: boolean;
-  isManagerOrAbove: boolean;
-  canAccessCanteen: (canteenId: string) => boolean;
-}
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -66,68 +30,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   const fetchRole = async (userId: string) => {
-    try {
-      const { data } = await supabase
-        .from("user_roles")
-        .select("role, canteen_id")
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (data) {
-        setRoleData({ role: data.role as UserRole, canteen_id: data.canteen_id });
-      } else {
-        setRoleData({ role: "owner", canteen_id: null });
-      }
-    } catch (err) {
-      setRoleData({ role: "owner", canteen_id: null });
-    } finally {
-      setLoading(false);
+    const { data, error } = await supabase
+      .from("user_roles")
+      .select("role, canteen_id")
+      .eq("user_id", userId)
+      .single();
+
+    if (error || !data) {
+      setRoleData(null);
+    } else {
+      setRoleData({ role: data.role as UserRole, canteen_id: data.canteen_id });
     }
   };
 
   useEffect(() => {
-    let mounted = true;
-
-    const init = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!mounted) return;
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await fetchRole(session.user.id);
-        } else {
-          setLoading(false);
-        }
-      } catch {
-        if (mounted) setLoading(false);
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        fetchRole(session.user.id).finally(() => setLoading(false));
+      } else {
+        setLoading(false);
       }
-    };
+    });
 
-    init();
-
+    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
-        if (!mounted) return;
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
           await fetchRole(session.user.id);
         } else {
           setRoleData(null);
-          setLoading(false);
         }
+        setLoading(false);
       }
     );
 
-    const timeout = setTimeout(() => {
-      if (mounted) setLoading(false);
-    }, 5000);
-
-    return () => {
-      mounted = false;
-      clearTimeout(timeout);
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
   const signIn = async (email: string, password: string): Promise<{ error: string | null }> => {
