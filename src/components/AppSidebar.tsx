@@ -34,10 +34,12 @@ const allNavItems = [
   { path: "/stock-audit", icon: ClipboardCheck, label: "Stock Audit", minRole: "manager" as const },
   { path: "/staff", icon: Users, label: "Staff", minRole: "manager" as const },
   { path: "/reports", icon: BarChart3, label: "Reports" },
+  { path: "/activity", icon: Activity, label: "Activity Log", minRole: "cashier" as const },
   { path: "/canteens", icon: Building2, label: "Canteens" },
   { path: "/users", icon: Shield, label: "User Management", minRole: "owner" as const },
   { path: "/api-keys", icon: Key, label: "API Keys", minRole: "owner" as const },
   { path: "/purchase-orders", icon: Truck, label: "Purchase Orders", minRole: "cashier" as const },
+  { path: "/activity", icon: Activity, label: "Activity Log", minRole: "cashier" as const },
   { path: "/canteens", icon: Building2, label: "Canteens", minRole: "cashier" as const },
 ];
 
