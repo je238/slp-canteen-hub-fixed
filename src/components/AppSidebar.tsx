@@ -19,6 +19,7 @@ import {
   Shield,
   Key,
   LogOut,
+  Activity,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
@@ -38,7 +39,6 @@ const allNavItems = [
   { path: "/canteens", icon: Building2, label: "Canteens" },
   { path: "/users", icon: Shield, label: "User Management", minRole: "owner" as const },
   { path: "/api-keys", icon: Key, label: "API Keys", minRole: "owner" as const },
-  { path: "/purchase-orders", icon: Truck, label: "Purchase Orders", minRole: "cashier" as const },
   { path: "/activity", icon: Activity, label: "Activity Log", minRole: "cashier" as const },
   { path: "/canteens", icon: Building2, label: "Canteens", minRole: "cashier" as const },
 ];
