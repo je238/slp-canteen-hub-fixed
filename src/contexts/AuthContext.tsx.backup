@@ -30,23 +30,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   const fetchRole = async (userId: string) => {
-    try {
-      const { data } = await supabase
-        .from("user_roles")
-        .select("role, canteen_id")
-        .eq("user_id", userId)
-        .maybeSingle();
-      if (data) {
-        setRoleData({ role: data.role as UserRole, canteen_id: data.canteen_id });
-      } else {
-        setRoleData(null);
-      }
-    } catch (err) {
+    const { data, error } = await supabase
+      .from("user_roles")
+      .select("role, canteen_id")
+      .eq("user_id", userId)
+      .single();
+
+    if (error || !data) {
       setRoleData(null);
+    } else {
+      setRoleData({ role: data.role as UserRole, canteen_id: data.canteen_id });
     }
   };
 
   useEffect(() => {
+    // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
@@ -57,6 +55,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
+    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setSession(session);
