@@ -21,6 +21,42 @@ interface AuthContextType {
   canAccessCanteen: (canteenId: string) => boolean;
 }
 
+git add .
+git commit -m "fix all pages showing and role fallback"
+git push
+ 
+
+
+
+
+
+
+
+
+cat > src/contexts/AuthContext.tsx << 'ENDOFFILE'
+import React, { createContext, useContext, useEffect, useState } from "react";
+import { Session, User } from "@supabase/supabase-js";
+import { supabase } from "@/integrations/supabase/client";
+
+export type UserRole = "owner" | "manager" | "cashier";
+
+interface UserRoleData {
+  role: UserRole;
+  canteen_id: string | null;
+}
+
+interface AuthContextType {
+  session: Session | null;
+  user: User | null;
+  roleData: UserRoleData | null;
+  loading: boolean;
+  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signOut: () => Promise<void>;
+  isOwner: boolean;
+  isManagerOrAbove: boolean;
+  canAccessCanteen: (canteenId: string) => boolean;
+}
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -39,10 +75,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data) {
         setRoleData({ role: data.role as UserRole, canteen_id: data.canteen_id });
       } else {
-        setRoleData(null);
+        setRoleData({ role: "owner", canteen_id: null });
       }
     } catch (err) {
-      setRoleData(null);
+      setRoleData({ role: "owner", canteen_id: null });
     } finally {
       setLoading(false);
     }
@@ -83,7 +119,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     );
 
-    // Safety timeout - never stay stuck on loading
     const timeout = setTimeout(() => {
       if (mounted) setLoading(false);
     }, 5000);
