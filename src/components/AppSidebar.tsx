@@ -37,6 +37,7 @@ const allNavItems = [
   { path: "/canteens", icon: Building2, label: "Canteens" },
   { path: "/users", icon: Shield, label: "User Management", minRole: "owner" as const },
   { path: "/api-keys", icon: Key, label: "API Keys", minRole: "owner" as const },
+  { path: "/canteens", icon: Building2, label: "Canteens", minRole: "cashier" as const },
 ];
 
 const ROLE_RANK: Record<string, number> = { owner: 3, manager: 2, cashier: 1 };
