@@ -21,6 +21,7 @@ import StockAuditPage from "./pages/StockAuditPage";
 import UserManagementPage from "./pages/UserManagementPage";
 import ApiKeysPage from "./pages/ApiKeysPage";
 import NotFound from "./pages/NotFound";
+import CanteenPage from "./pages/CanteenPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -86,6 +87,7 @@ const App = () => (
                   <ProtectedRoute minRole="owner"><ApiKeysPage /></ProtectedRoute>
                 } />
 
+                <Route path="/canteens" element={<CanteenPage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </AppProvider>

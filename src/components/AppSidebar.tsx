@@ -33,7 +33,8 @@ const allNavItems = [
   { path: "/expenses", icon: Wallet, label: "Expenses", minRole: "manager" as const },
   { path: "/stock-audit", icon: ClipboardCheck, label: "Stock Audit", minRole: "manager" as const },
   { path: "/staff", icon: Users, label: "Staff", minRole: "manager" as const },
-  { path: "/reports", icon: BarChart3, label: "Reports", minRole: "manager" as const },
+  { path: "/reports", icon: BarChart3, label: "Reports" },
+  { path: "/canteens", icon: Building2, label: "Canteens" },
   { path: "/users", icon: Shield, label: "User Management", minRole: "owner" as const },
   { path: "/api-keys", icon: Key, label: "API Keys", minRole: "owner" as const },
 ];
