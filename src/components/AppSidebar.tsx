@@ -83,7 +83,7 @@ export default function AppSidebar() {
               <Building2 className="w-5 h-5 text-accent-foreground" />
             </div>
             <div>
-              <h1 className="text-sm font-bold text-sidebar-accent-foreground tracking-wide">SLP Hospitality</h1>
+              <h1 className="text-sm font-bold text-sidebar-accent-foreground tracking-wide">SLP Canteen Hub</h1>
               <p className="text-[10px] text-sidebar-foreground">Canteen Management</p>
             </div>
           </div>
