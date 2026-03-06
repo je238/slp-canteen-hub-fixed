@@ -21,6 +21,7 @@ import StockAuditPage from "./pages/StockAuditPage";
 import UserManagementPage from "./pages/UserManagementPage";
 import ApiKeysPage from "./pages/ApiKeysPage";
 import NotFound from "./pages/NotFound";
+import PurchaseOrderPage from "./pages/PurchaseOrderPage";
 import CanteenPage from "./pages/CanteenPage";
 
 const queryClient = new QueryClient({
@@ -87,6 +88,7 @@ const App = () => (
                   <ProtectedRoute minRole="owner"><ApiKeysPage /></ProtectedRoute>
                 } />
 
+                <Route path="/purchase-orders" element={<PurchaseOrderPage />} />
                 <Route path="/canteens" element={<CanteenPage />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
