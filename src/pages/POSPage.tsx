@@ -53,11 +53,22 @@ export default function POSPage() {
     );
   };
 
-  const total = cart.reduce((sum, c) => sum + c.price * c.qty, 0);
+  const subtotal = cart.reduce((sum, c) => sum + c.price * c.qty, 0);
+  const gstRate = 0.05;
+  const gstAmount = Math.round(subtotal * gstRate);
+  const total = subtotal + gstAmount;
+
+  // Generate token number: counter + timestamp last 3 digits
+  const generateToken = () => {
+    const now = new Date();
+    return `${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}${Math.floor(Math.random()*90+10)}`;
+  };
 
   const handleCheckout = async (paymentMode: string) => {
     if (selectedCanteen === "all") { toast.error("Select a canteen first"); return; }
     if (cart.length === 0) return;
+
+    const tokenNumber = generateToken();
 
     try {
       const order = await createOrder.mutateAsync({
@@ -81,18 +92,23 @@ export default function POSPage() {
         orderNumber: order.order_number,
         canteenName,
         items: cartItems,
+        subtotal,
+        gstAmount,
+        gstRate: 5,
         total,
         paymentMode,
         date: dateStr,
+        tokenNumber,
       });
       setKotData({
         orderNumber: order.order_number,
         canteenName,
         items: cartItems,
         date: dateStr,
+        tokenNumber,
       });
 
-      toast.success(`Order completed! ₹${total} via ${paymentMode}`);
+      toast.success(`Order #${tokenNumber} completed! ₹${total} via ${paymentMode}`);
       setCart([]);
     } catch (err: any) {
       toast.error(err.message);
@@ -174,9 +190,19 @@ export default function POSPage() {
             )}
 
             <div className="border-t p-4 space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-muted-foreground">Total</span>
-                <span className="text-xl font-bold">₹{total}</span>
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-muted-foreground">Subtotal</span>
+                  <span className="text-sm">₹{subtotal}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-muted-foreground">GST (5%)</span>
+                  <span className="text-sm text-orange-500">+₹{gstAmount}</span>
+                </div>
+                <div className="flex justify-between items-center border-t pt-1.5">
+                  <span className="text-sm font-semibold">Total</span>
+                  <span className="text-xl font-bold">₹{total}</span>
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <Button variant="outline" size="sm" className="text-xs gap-1.5" disabled={cart.length === 0} onClick={() => handleCheckout("cash")}>
