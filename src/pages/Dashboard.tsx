@@ -1,9 +1,9 @@
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
-import { useOrders, useIngredients, useExpenses, usePurchases, useCanteens } from "@/hooks/useSupabaseData";
+import { useOrders, useIngredients, useExpenses, usePurchases, useCanteens, useFraudAlerts } from "@/hooks/useSupabaseData";
 import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { IndianRupee, ShoppingCart, AlertTriangle, TrendingUp, ArrowUpRight } from "lucide-react";
+import { IndianRupee, ShoppingCart, AlertTriangle, TrendingUp, ArrowUpRight, ShieldAlert } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 function formatCurrency(val: number) {
@@ -20,6 +20,9 @@ export default function Dashboard() {
   const { data: expenses } = useExpenses(selectedCanteen);
   const { data: purchases } = usePurchases(selectedCanteen);
   const { data: canteens } = useCanteens();
+  const { data: fraudAlerts } = useFraudAlerts(selectedCanteen);
+
+  const activeFraudAlerts = fraudAlerts?.filter(a => a.status === 'open') || [];
 
   const totalSales = orders?.reduce((s: number, o: any) => s + Number(o.total_amount), 0) || 0;
   const totalOrders = orders?.length || 0;
@@ -110,6 +113,55 @@ export default function Dashboard() {
                     </div>
                   </div>
                 ))
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Fraud Detection Widget */}
+          <Card className="border-none shadow-sm outline outline-1 outline-destructive/20 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-bl from-destructive/10 to-transparent pointer-events-none" />
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-destructive" />
+                  Fraud & Loss Alerts
+                </span>
+                {activeFraudAlerts.length > 0 && (
+                  <span className="text-xs bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full font-bold">
+                    {activeFraudAlerts.length}
+                  </span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {activeFraudAlerts.length === 0 ? (
+                <div className="text-center py-6">
+                  <ShieldAlert className="w-8 h-8 mx-auto text-success opacity-50 mb-2" />
+                  <p className="text-sm text-success">No active fraud alerts ✓</p>
+                  <p className="text-xs text-muted-foreground mt-1">System is healthy</p>
+                </div>
+              ) : (
+                <>
+                  {activeFraudAlerts.slice(0, 3).map((alert: any) => (
+                    <div key={alert.id} className="flex gap-3 py-2 border-b border-border/50 last:border-0 items-start">
+                      <div className={`mt-0.5 w-2 h-2 rounded-full shrink-0 ${alert.severity === 'critical' ? 'bg-destructive' : 'bg-orange-500'}`} />
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold leading-none mb-1">{alert.title}</p>
+                        <p className="text-[11px] text-muted-foreground line-clamp-1">{alert.description}</p>
+                        {alert.loss_value && (
+                          <p className="text-xs font-bold text-destructive mt-1">
+                            Est. Loss: {formatCurrency(Number(alert.loss_value))}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {activeFraudAlerts.length > 3 && (
+                    <p className="text-xs text-center text-muted-foreground pt-1 hover:underline cursor-pointer">
+                      +{activeFraudAlerts.length - 3} more alerts detected
+                    </p>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>

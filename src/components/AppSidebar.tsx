@@ -37,13 +37,11 @@ const allNavItems = [
   { path: "/staff", icon: Users, label: "Staff", minRole: "manager" as const },
   { path: "/reports", icon: BarChart3, label: "Reports" },
   { path: "/daily-report", icon: MessageCircle, label: "Daily Report", minRole: "cashier" as const },
+  { path: "/fraud-monitor", icon: Shield, label: "Fraud Monitor", minRole: "manager" as const },
   { path: "/activity", icon: Activity, label: "Activity Log", minRole: "cashier" as const },
   { path: "/canteens", icon: Building2, label: "Canteens" },
   { path: "/users", icon: Shield, label: "User Management", minRole: "owner" as const },
   { path: "/api-keys", icon: Key, label: "API Keys", minRole: "owner" as const },
-  { path: "/daily-report", icon: MessageCircle, label: "Daily Report", minRole: "cashier" as const },
-  { path: "/activity", icon: Activity, label: "Activity Log", minRole: "cashier" as const },
-  { path: "/canteens", icon: Building2, label: "Canteens", minRole: "cashier" as const },
 ];
 
 const ROLE_RANK: Record<string, number> = { owner: 3, manager: 2, cashier: 1 };

@@ -398,3 +398,30 @@ export function useStockLedger(canteenId?: string) {
     },
   });
 }
+// Fraud Alerts
+export function useFraudAlerts(canteenId?: string) {
+  return useQuery({
+    queryKey: ["fraudAlerts", canteenId],
+    queryFn: async () => {
+      let q = supabase.from("fraud_alerts").select("*, ingredients(name), purchases(id)").order("created_at", { ascending: false });
+      if (canteenId && canteenId !== "all") q = q.eq("canteen_id", canteenId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
+// Ingredient Usage Log
+export function useIngredientUsageLogs(canteenId?: string) {
+  return useQuery({
+    queryKey: ["ingredientUsageLog", canteenId],
+    queryFn: async () => {
+      let q = supabase.from("ingredient_usage_log").select("*, ingredients(name), menu_items(name)").order("created_at", { ascending: false }).limit(50);
+      if (canteenId && canteenId !== "all") q = q.eq("canteen_id", canteenId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data;
+    },
+  });
+}

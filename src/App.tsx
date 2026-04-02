@@ -25,6 +25,7 @@ import PurchaseOrderPage from "./pages/PurchaseOrderPage";
 import DailyReportPage from "./pages/DailyReportPage";
 import ActivityLogPage from "./pages/ActivityLogPage";
 import CanteenPage from "./pages/CanteenPage";
+import FraudMonitorPage from "./pages/FraudMonitorPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -94,6 +95,7 @@ const App = () => (
                 <Route path="/daily-report" element={<DailyReportPage />} />
                 <Route path="/activity" element={<ActivityLogPage />} />
                 <Route path="/canteens" element={<CanteenPage />} />
+                <Route path="/fraud-monitor" element={<ProtectedRoute minRole="manager"><FraudMonitorPage /></ProtectedRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </AppProvider>
