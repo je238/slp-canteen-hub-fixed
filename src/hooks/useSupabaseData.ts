@@ -99,10 +99,9 @@ export function useCreateOrder() {
       payment_mode: string;
       total_amount: number;
     }) => {
-      const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}`;
       const { data: order, error } = await supabase
         .from("orders")
-        .insert({ canteen_id, order_number: orderNumber, total_amount, payment_mode })
+        .insert({ canteen_id, total_amount, payment_mode })
         .select()
         .single();
       if (error) throw error;
