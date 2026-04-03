@@ -59,17 +59,9 @@ export default function POSPage() {
   const gstAmount = Math.round(subtotal * gstRate);
   const total = subtotal + gstAmount;
 
-  // Generate token number: counter + timestamp last 3 digits
-  const generateToken = () => {
-    const now = new Date();
-    return `${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}${Math.floor(Math.random()*90+10)}`;
-  };
-
   const handleCheckout = async (paymentMode: string) => {
     if (selectedCanteen === "all") { toast.error("Select a canteen first"); return; }
     if (cart.length === 0) return;
-
-    const tokenNumber = generateToken();
 
     try {
       const order = await createOrder.mutateAsync({
@@ -84,6 +76,8 @@ export default function POSPage() {
           total_price: c.price * c.qty,
         })),
       });
+
+      const tokenNumber = order.order_number;
 
       const canteenName = canteens?.find((c: any) => c.id === selectedCanteen)?.name || "Canteen";
       const dateStr = new Date().toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" });
@@ -131,9 +125,8 @@ export default function POSPage() {
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
-                  activeCategory === cat ? "bg-accent text-accent-foreground" : "bg-secondary text-secondary-foreground hover:bg-muted"
-                }`}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${activeCategory === cat ? "bg-accent text-accent-foreground" : "bg-secondary text-secondary-foreground hover:bg-muted"
+                  }`}
               >
                 {cat}
               </button>
