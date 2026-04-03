@@ -6,6 +6,7 @@ interface ReceiptItem {
   name: string;
   qty: number;
   price: number;
+  counter: string;
 }
 
 interface ReceiptData {
@@ -24,6 +25,9 @@ interface ReceiptData {
 export default function ReceiptPrint({ receipt, onClose }: { receipt: ReceiptData; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
 
+  // Group items by counter
+  const counters = Array.from(new Set(receipt.items.map(i => i.counter)));
+
   const handlePrint = () => {
     const content = ref.current;
     if (!content) return;
@@ -34,12 +38,9 @@ export default function ReceiptPrint({ receipt, onClose }: { receipt: ReceiptDat
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Courier New', monospace; width: 300px; margin: 0 auto; padding: 12px; font-size: 12px; color: #000; }
-        .center { text-align: center; }
-        .bold { font-weight: bold; }
-        .line { border-top: 1px dashed #000; margin: 6px 0; }
-        .row { display: flex; justify-content: space-between; }
         .token-box { border: 2px solid #000; text-align: center; padding: 8px; margin: 8px 0; border-radius: 4px; }
         .token-num { font-size: 36px; font-weight: bold; letter-spacing: 4px; }
+        .counter-label { background: #000; color: #fff; padding: 2px 6px; font-size: 10px; font-weight: bold; margin: 6px 0 3px; }
         @media print { body { margin: 0; } }
       </style></head><body>
       ${content.innerHTML}
@@ -62,7 +63,7 @@ export default function ReceiptPrint({ receipt, onClose }: { receipt: ReceiptDat
 
           <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
 
-          {/* Token Number — BIG */}
+          {/* Token Number */}
           <div style={{ border: "2px solid #000", textAlign: "center", padding: "10px 8px", margin: "8px 0", borderRadius: 4 }}>
             <div style={{ fontSize: 10, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Token Number</div>
             <div style={{ fontSize: 40, fontWeight: "bold", letterSpacing: 6, lineHeight: 1 }}>#{receipt.tokenNumber}</div>
@@ -86,37 +87,37 @@ export default function ReceiptPrint({ receipt, onClose }: { receipt: ReceiptDat
             <span style={{ flex: 1, textAlign: "right" }}>Amt</span>
           </div>
 
-          {/* Items */}
-          {receipt.items.map((item, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
-              <span style={{ flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
-              <span style={{ flex: 0.5, textAlign: "center" }}>{item.qty}</span>
-              <span style={{ flex: 1, textAlign: "right" }}>₹{item.price * item.qty}</span>
+          {/* Items grouped by counter */}
+          {counters.map(counter => (
+            <div key={counter}>
+              <div style={{ background: "#000", color: "#fff", padding: "2px 6px", fontSize: 10, fontWeight: "bold", letterSpacing: 0.5, margin: "5px 0 3px" }}>
+                ▶ {counter.toUpperCase()}
+              </div>
+              {receipt.items.filter(i => i.counter === counter).map((item, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "2px 0" }}>
+                  <span style={{ flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+                  <span style={{ flex: 0.5, textAlign: "center" }}>{item.qty}</span>
+                  <span style={{ flex: 1, textAlign: "right" }}>₹{item.price * item.qty}</span>
+                </div>
+              ))}
             </div>
           ))}
 
           <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
 
-          {/* Subtotal */}
+          {/* Subtotal + GST + Total */}
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-            <span>Subtotal</span>
-            <span>₹{receipt.subtotal}</span>
+            <span>Subtotal</span><span>₹{receipt.subtotal}</span>
           </div>
-
-          {/* GST */}
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-            <span>GST ({receipt.gstRate}%)</span>
-            <span>₹{receipt.gstAmount}</span>
+            <span>GST ({receipt.gstRate}%)</span><span>₹{receipt.gstAmount}</span>
           </div>
 
           <div style={{ borderTop: "1px dashed #000", margin: "6px 0" }} />
 
-          {/* Total */}
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", fontSize: 14 }}>
-            <span>TOTAL</span>
-            <span>₹{receipt.total}</span>
+            <span>TOTAL</span><span>₹{receipt.total}</span>
           </div>
-
           <div style={{ fontSize: 10, textAlign: "center", marginTop: 4 }}>
             Paid via: {receipt.paymentMode.toUpperCase()}
           </div>

@@ -16,6 +16,7 @@ interface CartItem {
   name: string;
   price: number;
   qty: number;
+  counter: string;
 }
 
 export default function POSPage() {
@@ -43,7 +44,7 @@ export default function POSPage() {
     setCart((prev) => {
       const existing = prev.find((c) => c.id === item.id);
       if (existing) return prev.map((c) => (c.id === item.id ? { ...c, qty: c.qty + 1 } : c));
-      return [...prev, { id: item.id, name: item.name, price: Number(item.price), qty: 1 }];
+      return [...prev, { id: item.id, name: item.name, price: Number(item.price), qty: 1, counter: item.category || "General" }];
     });
   };
 
@@ -86,7 +87,7 @@ export default function POSPage() {
 
       const canteenName = canteens?.find((c: any) => c.id === selectedCanteen)?.name || "Canteen";
       const dateStr = new Date().toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" });
-      const cartItems = cart.map(c => ({ name: c.name, qty: c.qty, price: c.price }));
+      const cartItems = cart.map(c => ({ name: c.name, qty: c.qty, price: c.price, counter: c.counter }));
 
       setReceiptData({
         orderNumber: order.order_number,
