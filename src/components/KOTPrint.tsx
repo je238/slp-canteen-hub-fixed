@@ -22,33 +22,59 @@ export default function KOTPrint({ kot, onClose }: { kot: KOTData; onClose: () =
   // Group items by counter
   const counters = Array.from(new Set(kot.items.map(i => i.counter)));
 
-  // For Dt and Time parsing based on short format "DD/MM/YYYY, HH:MM"
   const dateParts = kot.date.split(",");
   const dtStr = dateParts[0]?.trim() || kot.date;
   const timeStr = dateParts[1]?.trim() || "";
   const dtFormatted = dtStr.replace(/\//g, "-");
 
-  const handlePrint = () => {
-    const content = ref.current;
-    if (!content) return;
-    const win = window.open("", "_blank", "width=320,height=600");
-    if (!win) return;
-    win.document.write(`
-      <html><head><title>KOT - Token #${kot.tokenNumber}</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Courier New', monospace; width: 280px; margin: 0 auto; padding: 12px; font-size: 13px; color: #000; }
-        .ticket { margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px dashed #ccc; }
-        @media print { 
-          body { margin: 0; } 
-          .ticket { margin-bottom: 0; padding-bottom: 0; border-bottom: none; page-break-after: always; } 
+  const printSingle = (counter: string) => {
+    return new Promise<void>((resolve) => {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+      const safeId = `ticket-${counter.replace(/\s+/g, '-')}`;
+      const ticketHtml = document.getElementById(safeId)?.innerHTML || '';
+
+      iframe.contentWindow?.document.open();
+      iframe.contentWindow?.document.write(`
+        <html><head><title>KOT - ${counter}</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: 'Courier New', monospace; width: 280px; margin: 0 auto; padding: 12px; font-size: 13px; color: #000; }
+        </style></head><body>
+        ${ticketHtml}
+        <script>
+          window.onafterprint = () => { window.parent.postMessage('done_print_${safeId}', '*'); };
+          window.onload = () => { window.print(); };
+        <\/script>
+        </body></html>
+      `);
+      iframe.contentWindow?.document.close();
+
+      const listener = (e: MessageEvent) => {
+        if (e.data === `done_print_${safeId}`) {
+          window.removeEventListener('message', listener);
+          setTimeout(() => { if (document.body.contains(iframe)) document.body.removeChild(iframe); }, 1000);
+          resolve();
         }
-      </style></head><body>
-      ${content.innerHTML}
-      <script>window.print(); window.close();<\/script>
-      </body></html>
-    `);
-    win.document.close();
+      };
+      window.addEventListener('message', listener);
+
+      // Fallback in case onafterprint fails or takes too long
+      setTimeout(() => {
+        window.removeEventListener('message', listener);
+        if (document.body.contains(iframe)) document.body.removeChild(iframe);
+        resolve();
+      }, 3000);
+    });
+  };
+
+  const handlePrintAll = async () => {
+    // Print each counter sequentially as a separate print job
+    // This forces the thermal printer to hardware-cut the paper between each KOT.
+    for (const counter of counters) {
+      await printSingle(counter);
+    }
   };
 
   return (
@@ -56,11 +82,11 @@ export default function KOTPrint({ kot, onClose }: { kot: KOTData; onClose: () =
       <div className="bg-card rounded-lg shadow-lg max-w-sm w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto w-[340px]">
         <div ref={ref} style={{ fontFamily: "'Courier New', monospace", fontSize: 13, color: "#000", background: "#fff", padding: "16px 0" }}>
 
-          {/* Render a separate ticket block for each counter */}
           {counters.map((counter, idx) => {
             const counterItems = kot.items.filter(i => i.counter === counter);
+            const safeId = `ticket-${counter.replace(/\s+/g, '-')}`;
             return (
-              <div key={counter} className="ticket" style={{ pageBreakAfter: "always", marginBottom: idx < counters.length - 1 ? 24 : 0, paddingBottom: idx < counters.length - 1 ? 16 : 0, borderBottom: idx < counters.length - 1 ? "1px dashed #ccc" : "none" }}>
+              <div key={counter} id={safeId} className="ticket" style={{ marginBottom: idx < counters.length - 1 ? 24 : 0, paddingBottom: idx < counters.length - 1 ? 16 : 0, borderBottom: idx < counters.length - 1 ? "1px dashed #ccc" : "none" }}>
 
                 <div style={{ textAlign: "center", marginBottom: 8 }}>
                   <div style={{ fontSize: 15, letterSpacing: 0.5 }}>{counter.toUpperCase()}</div>
@@ -83,7 +109,6 @@ export default function KOTPrint({ kot, onClose }: { kot: KOTData; onClose: () =
 
                 <div style={{ borderTop: "1px dashed #000", margin: "8px 0" }} />
 
-                {/* Items */}
                 <div style={{ fontSize: 12 }}>
                   {counterItems.map((item, i) => (
                     <div key={i} style={{ marginBottom: 6 }}>
@@ -112,8 +137,8 @@ export default function KOTPrint({ kot, onClose }: { kot: KOTData; onClose: () =
         </div>
 
         <div className="flex gap-2 p-2">
-          <Button onClick={handlePrint} className="flex-1 gap-1.5">
-            <Printer className="w-4 h-4" /> Print KOT
+          <Button onClick={handlePrintAll} className="flex-1 gap-1.5 bg-green-600 hover:bg-green-700">
+            <Printer className="w-4 h-4" /> Print KOT (Auto-cut)
           </Button>
           <Button variant="outline" onClick={onClose} className="flex-1">Close</Button>
         </div>
