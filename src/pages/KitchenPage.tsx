@@ -29,21 +29,30 @@ function useNow(intervalMs = 1000) {
   return now;
 }
 
-function elapsed(from: string, now: number) {
+// Leaf component so only the timer text re-renders each second,
+// not the whole board of cards.
+function ElapsedTime({ from }: { from: string }) {
+  const now = useNow();
   const secs = Math.max(0, Math.floor((now - new Date(from).getTime()) / 1000));
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
+  const mins = secs / 60;
+  const tone = mins >= 10 ? "text-red-500" : mins >= 5 ? "text-amber-500" : "text-muted-foreground";
+  return (
+    <span className={`text-sm font-semibold tabular-nums ${tone}`}>
+      {Math.floor(secs / 60)}:{(secs % 60).toString().padStart(2, "0")}
+    </span>
+  );
 }
 
-function elapsedMinutes(from: string, now: number) {
-  return (now - new Date(from).getTime()) / 60_000;
-}
+// One shared AudioContext — browsers cap concurrent contexts, and a burst
+// of orders must not silence the chime mid-rush.
+let chimeCtx: AudioContext | null = null;
 
 function playNewOrderChime() {
   try {
     const Ctx = window.AudioContext || (window as any).webkitAudioContext;
-    const ctx = new Ctx();
+    chimeCtx ||= new Ctx();
+    const ctx = chimeCtx;
+    if (ctx.state === "suspended") void ctx.resume();
     [660, 880].forEach((freq, i) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -58,7 +67,6 @@ function playNewOrderChime() {
       osc.start(t);
       osc.stop(t + 0.4);
     });
-    setTimeout(() => ctx.close(), 1200);
   } catch {
     // audio unavailable — silent fallback
   }
@@ -76,14 +84,11 @@ const NEXT_ACTION: Record<string, { to: "preparing" | "ready" | "served"; label:
   ready: { to: "served", label: "Served" },
 };
 
-function OrderCard({ order, now, onAdvance, onCancel }: {
+function OrderCard({ order, onAdvance, onCancel }: {
   order: KitchenOrder;
-  now: number;
   onAdvance: (order: KitchenOrder) => void;
   onCancel: (order: KitchenOrder) => void;
 }) {
-  const mins = elapsedMinutes(order.created_at, now);
-  const timeTone = mins >= 10 ? "text-red-500" : mins >= 5 ? "text-amber-500" : "text-muted-foreground";
   const action = NEXT_ACTION[order.kitchen_status];
 
   return (
@@ -99,7 +104,7 @@ function OrderCard({ order, now, onAdvance, onCancel }: {
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className={`text-sm font-semibold tabular-nums ${timeTone}`}>{elapsed(order.created_at, now)}</span>
+          <ElapsedTime from={order.created_at} />
           <button
             onClick={() => onCancel(order)}
             className="w-6 h-6 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10"
@@ -141,17 +146,22 @@ function OrderCard({ order, now, onAdvance, onCancel }: {
 export default function KitchenPage() {
   const { selectedCanteen } = useAppContext();
   useRealtimeSubscription(["orders"]);
-  const { data: schemaReady, isLoading: schemaLoading } = useKdsSchemaReady();
+  const { data: schemaReady, isLoading: schemaLoading, isError: schemaProbeFailed, refetch: retryProbe } = useKdsSchemaReady();
   const enabled = schemaReady === true;
   const { data: queue, isLoading } = useKitchenQueue(selectedCanteen, enabled);
   const { data: served } = useServedToday(selectedCanteen, enabled);
   const updateStatus = useUpdateKitchenStatus();
-  const now = useNow();
 
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem("kds-sound") !== "off");
   const [fullscreen, setFullscreen] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<KitchenOrder | null>(null);
   const seenIds = useRef<Set<string> | null>(null);
+
+  // Orders already on the board when the canteen filter changes are not
+  // "new" — re-seed instead of chiming for all of them.
+  useEffect(() => {
+    seenIds.current = null;
+  }, [selectedCanteen]);
 
   // Chime when a brand-new order appears (skip the initial load).
   useEffect(() => {
@@ -235,6 +245,19 @@ export default function KitchenPage() {
     );
   }
 
+  // Probe failed for a non-schema reason (network blip): say so instead of
+  // rendering an empty board that looks like "no orders".
+  if (schemaProbeFailed) {
+    return (
+      <AppLayout title="Kitchen Display">
+        <div className="text-center py-16 space-y-3">
+          <p className="text-sm text-muted-foreground">Can't reach the database right now — the queue may not be empty.</p>
+          <Button variant="outline" onClick={() => retryProbe()}>Retry</Button>
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout title="Kitchen Display">
       <div className="space-y-4 animate-fade-in">
@@ -286,7 +309,7 @@ export default function KitchenPage() {
                     </p>
                   ) : (
                     orders.map((o) => (
-                      <OrderCard key={o.id} order={o} now={now} onAdvance={advance} onCancel={setCancelTarget} />
+                      <OrderCard key={o.id} order={o} onAdvance={advance} onCancel={setCancelTarget} />
                     ))
                   )}
                 </div>

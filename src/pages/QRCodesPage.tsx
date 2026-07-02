@@ -11,6 +11,11 @@ function orderUrl(canteenId: string) {
   return `${window.location.origin}/order/${canteenId}`;
 }
 
+// Canteen names are user-entered and end up in document.write'd HTML.
+function escapeHtml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 function CanteenQRCard({ canteen }: { canteen: { id: string; name: string; location?: string | null } }) {
   const posterRef = useRef<HTMLDivElement>(null);
   const url = orderUrl(canteen.id);
@@ -33,7 +38,7 @@ function CanteenQRCard({ canteen }: { canteen: { id: string; name: string; locat
       return;
     }
     win.document.write(`
-      <html><head><title>QR Poster — ${canteen.name}</title>
+      <html><head><title>QR Poster — ${escapeHtml(canteen.name)}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; }

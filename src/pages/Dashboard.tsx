@@ -5,12 +5,7 @@ import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { IndianRupee, ShoppingCart, AlertTriangle, TrendingUp, ArrowUpRight, ShieldAlert } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-
-function formatCurrency(val: number) {
-  if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
-  if (val >= 1000) return `₹${(val / 1000).toFixed(1)}K`;
-  return `₹${val}`;
-}
+import { formatCurrency } from "@/lib/utils";
 
 export default function Dashboard() {
   const { selectedCanteen } = useAppContext();

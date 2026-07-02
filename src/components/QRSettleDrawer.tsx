@@ -14,16 +14,14 @@ const STATUS_LABEL: Record<string, string> = {
 
 function SettleCard({ order }: { order: KitchenOrder }) {
   const settle = useSettleQROrder();
-  const [settling, setSettling] = useState<string | null>(null);
+  const settling = settle.isPending;
 
   const handleSettle = (mode: string) => {
-    setSettling(mode);
     settle.mutate(
       { id: order.id, payment_mode: mode },
       {
         onSuccess: () => toast.success(`Token #${order.order_number} settled — ₹${Number(order.total_amount)} via ${mode}`),
         onError: (e: any) => toast.error(e.message),
-        onSettled: () => setSettling(null),
       }
     );
   };
@@ -53,13 +51,13 @@ function SettleCard({ order }: { order: KitchenOrder }) {
       <div className="flex items-center justify-between border-t pt-2">
         <span className="text-sm font-bold tabular-nums">₹{Number(order.total_amount)}</span>
         <div className="flex gap-1.5">
-          <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled={!!settling} onClick={() => handleSettle("cash")}>
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled={settling} onClick={() => handleSettle("cash")}>
             <Banknote className="w-3.5 h-3.5" /> Cash
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled={!!settling} onClick={() => handleSettle("card")}>
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled={settling} onClick={() => handleSettle("card")}>
             <CreditCard className="w-3.5 h-3.5" /> Card
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled={!!settling} onClick={() => handleSettle("upi")}>
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1" disabled={settling} onClick={() => handleSettle("upi")}>
             <Smartphone className="w-3.5 h-3.5" /> UPI
           </Button>
         </div>

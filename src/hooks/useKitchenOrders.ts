@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { orderTotals } from "@/lib/pricing";
 
 export type KitchenStatus = "new" | "preparing" | "ready" | "served" | "cancelled";
 
@@ -22,16 +23,26 @@ export interface KitchenOrder {
   order_items: { id: string; item_name: string; quantity: number; unit_price: number; total_price: number }[];
 }
 
+// Query keys derived from the orders table — invalidate together after
+// any order mutation (mirrors the realtime subscription map).
+export const ORDER_QUERY_KEYS = ["orders", "kitchenQueue", "kitchenServed", "qrUnsettled"] as const;
+
+const LIFECYCLE_COLUMNS = /kitchen_status|order_type|payment_status|special_instructions/;
+
 // True when the error means the lifecycle columns from
 // 20260702072533_order_lifecycle_kds_qr.sql are not applied yet.
+// Deliberately narrow: a check-constraint violation whose *name* contains
+// "kitchen_status" must NOT be mistaken for a missing column.
 export function isSchemaMissingError(err: unknown): boolean {
   const e = err as { code?: string; message?: string } | null;
   if (!e) return false;
   const msg = e.message || "";
+  if (!LIFECYCLE_COLUMNS.test(msg)) return false;
   return (
-    e.code === "PGRST204" ||
-    e.code === "42703" ||
-    /kitchen_status|order_type|payment_status|special_instructions/.test(msg)
+    e.code === "PGRST204" || // PostgREST: "Could not find the 'x' column ... in the schema cache"
+    e.code === "42703" ||    // Postgres: undefined column
+    /could not find the '.*' column/i.test(msg) ||
+    /column .* does not exist/i.test(msg)
   );
 }
 
@@ -58,7 +69,13 @@ function startOfServiceDay(): string {
   return d.toISOString();
 }
 
-// Live kitchen queue: today's orders that are new / preparing / ready.
+// Rolling window for live kitchen work. A fixed "local midnight" cutoff
+// would make unserved night-canteen orders vanish from the queue at 00:00.
+function liveOrdersSince(): string {
+  return new Date(Date.now() - 12 * 3600_000).toISOString();
+}
+
+// Live kitchen queue: recent orders that are new / preparing / ready.
 export function useKitchenQueue(canteenId?: string, enabled = true) {
   return useQuery({
     queryKey: ["kitchenQueue", canteenId],
@@ -69,7 +86,7 @@ export function useKitchenQueue(canteenId?: string, enabled = true) {
         .from("orders")
         .select("*, order_items(*)")
         .in("kitchen_status", ["new", "preparing", "ready"])
-        .gte("created_at", startOfServiceDay())
+        .gte("created_at", liveOrdersSince())
         .order("created_at", { ascending: true });
       if (canteenId && canteenId !== "all") q = q.eq("canteen_id", canteenId);
       const { data, error } = await q;
@@ -112,14 +129,18 @@ export function useUpdateKitchenStatus() {
       if (kitchen_status === "ready") patch.ready_at = now;
       if (kitchen_status === "served") patch.served_at = now;
       if (kitchen_status === "cancelled") patch.status = "cancelled";
-      const { error } = await supabase.from("orders").update(patch).eq("id", id);
+      let q = supabase.from("orders").update(patch).eq("id", id);
+      // A stale card on another screen must not cancel food that was
+      // already handed over (that would also restock its ingredients).
+      if (kitchen_status === "cancelled") q = q.neq("kitchen_status", "served");
+      const { data, error } = await q.select("id");
       if (error) throw error;
+      if (kitchen_status === "cancelled" && (data?.length ?? 0) === 0) {
+        throw new Error("Order was already served on another screen — not cancelled.");
+      }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["kitchenQueue"] });
-      qc.invalidateQueries({ queryKey: ["kitchenServed"] });
-      qc.invalidateQueries({ queryKey: ["orders"] });
-      qc.invalidateQueries({ queryKey: ["qrUnsettled"] });
+      for (const key of ORDER_QUERY_KEYS) qc.invalidateQueries({ queryKey: [key] });
     },
   });
 }
@@ -157,9 +178,7 @@ export function useCreateQROrder() {
         };
       });
 
-      const subtotal = orderItems.reduce((s, i) => s + i.total_price, 0);
-      const gst = Math.round(subtotal * 0.05);
-      const total = subtotal + gst;
+      const { subtotal, gst, total } = orderTotals(orderItems.reduce((s, i) => s + i.total_price, 0));
 
       const { data: order, error } = await supabase
         .from("orders")
@@ -185,18 +204,21 @@ export function useCreateQROrder() {
       return { order, subtotal, gst, total };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["kitchenQueue"] });
-      qc.invalidateQueries({ queryKey: ["orders"] });
+      for (const key of ORDER_QUERY_KEYS) qc.invalidateQueries({ queryKey: [key] });
     },
   });
 }
 
-// Live tracking of a single order (QR customer view).
+// Live tracking of a single order (QR customer view). Stops polling once
+// the order reaches a terminal state — abandoned tabs shouldn't poll forever.
 export function useTrackOrder(orderId?: string) {
   return useQuery({
     queryKey: ["trackOrder", orderId],
     enabled: !!orderId,
-    refetchInterval: 5000,
+    refetchInterval: (query) => {
+      const s = (query.state.data as KitchenOrder | null | undefined)?.kitchen_status;
+      return s === "served" || s === "cancelled" ? false : 5000;
+    },
     queryFn: async () => {
       const { data, error } = await supabase
         .from("orders")
@@ -209,7 +231,9 @@ export function useTrackOrder(orderId?: string) {
   });
 }
 
-// QR orders from today that still need to be paid at the counter.
+// QR orders that still need to be paid at the counter. Deliberately not
+// date-bounded: an unpaid order must stay visible until it is settled or
+// cancelled, even across midnight.
 export function useUnsettledQROrders(canteenId?: string, enabled = true) {
   return useQuery({
     queryKey: ["qrUnsettled", canteenId],
@@ -223,7 +247,6 @@ export function useUnsettledQROrders(canteenId?: string, enabled = true) {
         .eq("order_type", "qr")
         .eq("payment_status", "unpaid")
         .neq("kitchen_status", "cancelled")
-        .gte("created_at", startOfServiceDay())
         .order("created_at", { ascending: true });
       if (canteenId && canteenId !== "all") q = q.eq("canteen_id", canteenId);
       const { data, error } = await q;
@@ -237,21 +260,27 @@ export function useUnsettledQROrders(canteenId?: string, enabled = true) {
 }
 
 // Cashier settles a QR order: records payment mode, marks it a completed sale.
+// Guarded so an order the kitchen just cancelled (or one already settled on
+// another terminal) cannot be charged: that would book revenue for food that
+// was never made — and whose ingredients were already restocked.
 export function useSettleQROrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, payment_mode }: { id: string; payment_mode: string }) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("orders")
         .update({ payment_mode, payment_status: "paid", status: "completed" })
-        .eq("id", id);
+        .eq("id", id)
+        .eq("payment_status", "unpaid")
+        .neq("kitchen_status", "cancelled")
+        .select("id");
       if (error) throw error;
+      if ((data?.length ?? 0) === 0) {
+        throw new Error("Not settled — this order was cancelled or already paid. Do not take payment.");
+      }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["qrUnsettled"] });
-      qc.invalidateQueries({ queryKey: ["orders"] });
-      qc.invalidateQueries({ queryKey: ["kitchenQueue"] });
-      qc.invalidateQueries({ queryKey: ["kitchenServed"] });
+      for (const key of ORDER_QUERY_KEYS) qc.invalidateQueries({ queryKey: [key] });
     },
   });
 }

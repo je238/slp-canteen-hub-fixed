@@ -18,7 +18,10 @@ export default function DailyReportPage() {
   const [reportDate, setReportDate] = useState(new Date().toISOString().split("T")[0]);
 
   const canteenName = selectedCanteen === "all" ? "All Canteens" : canteens?.find((c: any) => c.id === selectedCanteen)?.name || "Canteen";
-  const dateOrders = orders?.filter((o: any) => o.created_at?.startsWith(reportDate)) || [];
+  // Only settled sales — unpaid QR orders and cancellations are not revenue
+  const dateOrders = orders?.filter((o: any) =>
+    o.created_at?.startsWith(reportDate) && (o.status ?? "completed") === "completed"
+  ) || [];
   const dateExpenses = expenses?.filter((e: any) => e.expense_date === reportDate) || [];
   const totalSales = dateOrders.reduce((s: number, o: any) => s + Number(o.total_amount || 0), 0);
   const totalExpenses = dateExpenses.reduce((s: number, e: any) => s + Number(e.amount || 0), 0);

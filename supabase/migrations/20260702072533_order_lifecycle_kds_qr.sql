@@ -5,7 +5,15 @@
 -- Safe to re-run: every statement is idempotent.
 -- ============================================================
 
--- 1. Lifecycle columns on orders
+-- 1. Lifecycle columns on orders. The backfill in step 3 must run only on
+--    the FIRST application — on a re-run it would wipe live kitchen orders
+--    out of the queue — so record whether the column already existed.
+CREATE TEMP TABLE IF NOT EXISTS _kds_migration_state AS
+SELECT NOT EXISTS (
+  SELECT 1 FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'kitchen_status'
+) AS is_first_run;
+
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS kitchen_status TEXT NOT NULL DEFAULT 'new';
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS order_type TEXT NOT NULL DEFAULT 'pos';
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'paid';
@@ -36,11 +44,15 @@ BEGIN
   END IF;
 END $$;
 
--- 3. Backfill: everything that existed before this migration is history,
---    not live kitchen work. Mark it served so the KDS queue starts clean.
+-- 3. Backfill (first run only): everything that existed before this
+--    migration is history, not live kitchen work. Mark it served so the
+--    KDS queue starts clean. On a re-run this must NOT touch live orders.
 UPDATE public.orders
 SET kitchen_status = 'served', served_at = created_at
-WHERE kitchen_status = 'new';
+WHERE kitchen_status = 'new'
+  AND (SELECT is_first_run FROM _kds_migration_state);
+
+DROP TABLE IF EXISTS _kds_migration_state;
 
 -- 4. Index for the kitchen queue (canteen + live statuses, newest first)
 CREATE INDEX IF NOT EXISTS idx_orders_kitchen_queue

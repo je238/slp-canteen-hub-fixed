@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import ReceiptPrint from "@/components/ReceiptPrint";
 import KOTPrint from "@/components/KOTPrint";
 import { QRSettleButton } from "@/components/QRSettleDrawer";
+import { orderTotals } from "@/lib/pricing";
 
 interface CartItem {
   id: string;
@@ -55,10 +56,7 @@ export default function POSPage() {
     );
   };
 
-  const subtotal = cart.reduce((sum, c) => sum + c.price * c.qty, 0);
-  const gstRate = 0.05;
-  const gstAmount = Math.round(subtotal * gstRate);
-  const total = subtotal + gstAmount;
+  const { subtotal, gst: gstAmount, total } = orderTotals(cart.reduce((sum, c) => sum + c.price * c.qty, 0));
 
   const handleCheckout = async (paymentMode: string) => {
     if (selectedCanteen === "all") { toast.error("Select a canteen first"); return; }

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Store, Plus, Search, Phone, Mail, Pencil, IndianRupee, Clock, PackageOpen } from "lucide-react";
 import { toast } from "sonner";
+import { formatCurrency } from "@/lib/utils";
 
 interface VendorForm {
   name: string;
@@ -22,12 +23,8 @@ interface VendorForm {
 
 const EMPTY_FORM: VendorForm = { name: "", contact_person: "", phone: "", email: "", address: "" };
 
-function formatMoney(v: number) {
-  if (v >= 100000) return `₹${(v / 100000).toFixed(1)}L`;
-  if (v >= 1000) return `₹${(v / 1000).toFixed(1)}K`;
-  return `₹${Math.round(v)}`;
-}
-
+// NOTE: the parent remounts this dialog via the `key` prop whenever the
+// target vendor changes, so seeding useState from props here is safe.
 function VendorFormDialog({ open, onOpenChange, initial, vendorId, canteenId }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
@@ -39,14 +36,6 @@ function VendorFormDialog({ open, onOpenChange, initial, vendorId, canteenId }: 
   const addVendor = useAddSupplier();
   const updateVendor = useUpdateSupplier();
   const editing = !!vendorId;
-
-  // Re-seed the form each time the dialog opens with a different vendor
-  const [seenKey, setSeenKey] = useState("");
-  const key = `${vendorId || "new"}-${open}`;
-  if (key !== seenKey) {
-    setSeenKey(key);
-    setForm(initial);
-  }
 
   const set = (field: keyof VendorForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -265,11 +254,11 @@ export default function VendorsPage() {
                         </div>
                         <div>
                           <p className="text-[10px] text-muted-foreground uppercase tracking-wide flex items-center gap-1"><IndianRupee className="w-3 h-3" /> Spend</p>
-                          <p className="text-sm font-bold tabular-nums">{formatMoney(s.spend)}</p>
+                          <p className="text-sm font-bold tabular-nums">{formatCurrency(s.spend)}</p>
                         </div>
                         <div>
                           <p className="text-[10px] text-muted-foreground uppercase tracking-wide flex items-center gap-1"><Clock className="w-3 h-3" /> Pending</p>
-                          <p className={`text-sm font-bold tabular-nums ${s.pending > 0 ? "text-amber-600" : ""}`}>{s.pending > 0 ? formatMoney(s.pending) : "—"}</p>
+                          <p className={`text-sm font-bold tabular-nums ${s.pending > 0 ? "text-amber-600" : ""}`}>{s.pending > 0 ? formatCurrency(s.pending) : "—"}</p>
                         </div>
                       </div>
                     </CardContent>
@@ -282,6 +271,7 @@ export default function VendorsPage() {
       </div>
 
       <VendorFormDialog
+        key={`${editVendor?.id ?? "new"}-${formOpen}`}
         open={formOpen}
         onOpenChange={setFormOpen}
         vendorId={editVendor?.id}

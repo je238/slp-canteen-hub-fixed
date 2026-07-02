@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { isSchemaMissingError } from "@/hooks/useKitchenOrders";
 
 // Canteens
 export function useCanteens() {
@@ -107,7 +108,7 @@ export function useCreateOrder() {
         .insert({ canteen_id, total_amount, payment_mode, kitchen_status: "new", order_type: "pos", payment_status: "paid" })
         .select()
         .single();
-      if (error && (error.code === "PGRST204" || /kitchen_status|order_type|payment_status/.test(error.message || ""))) {
+      if (error && isSchemaMissingError(error)) {
         ({ data: order, error } = await supabase
           .from("orders")
           .insert({ canteen_id, total_amount, payment_mode })
@@ -143,13 +144,15 @@ export function useOrders(canteenId?: string) {
   });
 }
 
-// Suppliers
+// Suppliers. A NULL canteen_id means a global vendor (e.g. added while
+// "All Canteens" was selected) — those must show up under every canteen,
+// not vanish the moment a specific canteen is picked.
 export function useSuppliers(canteenId?: string) {
   return useQuery({
     queryKey: ["suppliers", canteenId],
     queryFn: async () => {
       let q = supabase.from("suppliers").select("*").order("name");
-      if (canteenId && canteenId !== "all") q = q.eq("canteen_id", canteenId);
+      if (canteenId && canteenId !== "all") q = q.or(`canteen_id.eq.${canteenId},canteen_id.is.null`);
       const { data, error } = await q;
       if (error) throw error;
       return data;

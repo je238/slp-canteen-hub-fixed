@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Search, Plus, Minus, ShoppingBag, ChevronLeft, ChefHat, CheckCircle2, Clock, UtensilsCrossed, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { orderTotals } from "@/lib/pricing";
 
 interface CartLine {
   id: string;
@@ -16,8 +17,6 @@ interface CartLine {
   price: number;
   qty: number;
 }
-
-const GST_RATE = 0.05;
 
 function activeOrderKey(canteenId: string) {
   return `qr-active-order-${canteenId}`;
@@ -33,6 +32,16 @@ const TRACK_STEPS = [
 
 function TrackingView({ orderId, canteenName, onNewOrder }: { orderId: string; canteenName: string; onNewOrder: () => void }) {
   const { data: order, isLoading } = useTrackOrder(orderId);
+
+  // A finished order from a previous day is history, not something to keep
+  // showing — clear it so scanning the poster tomorrow lands on the menu.
+  const isStale =
+    !!order &&
+    (order.kitchen_status === "served" || order.kitchen_status === "cancelled") &&
+    new Date(order.created_at) < new Date(new Date().setHours(0, 0, 0, 0));
+  useEffect(() => {
+    if (isStale) onNewOrder();
+  }, [isStale, onNewOrder]);
 
   if (isLoading) {
     return <p className="text-center text-sm text-muted-foreground py-16">Loading your order…</p>;
@@ -165,9 +174,7 @@ export default function QROrderPage() {
     });
   };
 
-  const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
-  const gst = Math.round(subtotal * GST_RATE);
-  const total = subtotal + gst;
+  const { subtotal, gst, total } = orderTotals(cart.reduce((s, c) => s + c.price * c.qty, 0));
   const itemCount = cart.reduce((s, c) => s + c.qty, 0);
 
   const placeOrder = async () => {

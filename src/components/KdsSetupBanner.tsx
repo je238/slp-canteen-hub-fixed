@@ -3,8 +3,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Copy, Check, Database } from "lucide-react";
 import { toast } from "sonner";
-// Vite raw import — ships the migration SQL so it can be copied from the UI
-import migrationSql from "../../supabase/migrations/20260702072533_order_lifecycle_kds_qr.sql?raw";
+// Vite raw imports — ship BOTH migrations so the copy button applies the
+// complete setup (lifecycle columns + deduction fix / cancel restock).
+import lifecycleSql from "../../supabase/migrations/20260702072533_order_lifecycle_kds_qr.sql?raw";
+import restockSql from "../../supabase/migrations/20260702101213_cancel_order_restock.sql?raw";
+
+const migrationSql = `${lifecycleSql}\n\n${restockSql}`;
 
 export default function KdsSetupBanner({ feature }: { feature: string }) {
   const [copied, setCopied] = useState(false);
@@ -40,7 +44,7 @@ export default function KdsSetupBanner({ feature }: { feature: string }) {
           <Button variant="outline" onClick={() => window.location.reload()}>I ran it — refresh</Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          File: supabase/migrations/20260702072533_order_lifecycle_kds_qr.sql
+          Source: supabase/migrations/20260702072533 + 20260702101213
         </p>
       </CardContent>
     </Card>

@@ -14,10 +14,11 @@ export default function ReportsPage() {
   const { data: ingredients } = useIngredients(selectedCanteen);
   const { data: purchases } = usePurchases(selectedCanteen);
 
-  // Daily sales
-  const todayOrders = orders?.filter((o: any) => new Date(o.created_at).toDateString() === new Date().toDateString()) || [];
+  // Only settled sales count — unpaid QR orders and cancellations are not revenue
+  const settledOrders = orders?.filter((o: any) => (o.status ?? "completed") === "completed") || [];
+  const todayOrders = settledOrders.filter((o: any) => new Date(o.created_at).toDateString() === new Date().toDateString());
   const todaySales = todayOrders.reduce((s: number, o: any) => s + Number(o.total_amount), 0);
-  const totalSales = orders?.reduce((s: number, o: any) => s + Number(o.total_amount), 0) || 0;
+  const totalSales = settledOrders.reduce((s: number, o: any) => s + Number(o.total_amount), 0);
   const totalExpenses = expenses?.reduce((s: number, e: any) => s + Number(e.amount), 0) || 0;
   const totalPurchases = purchases?.filter((p: any) => p.status === "confirmed").reduce((s: number, p: any) => s + Number(p.total_amount), 0) || 0;
   const estimatedProfit = totalSales - totalExpenses - totalPurchases;
@@ -41,10 +42,10 @@ export default function ReportsPage() {
   const expCatData = Object.entries(expByCat).map(([name, value]) => ({ name, value }));
 
   // Payment mode breakdown
-  const paymentModes = orders?.reduce((acc: Record<string, number>, o: any) => {
+  const paymentModes = settledOrders.reduce((acc: Record<string, number>, o: any) => {
     acc[o.payment_mode] = (acc[o.payment_mode] || 0) + Number(o.total_amount);
     return acc;
-  }, {} as Record<string, number>) || {};
+  }, {} as Record<string, number>);
   const paymentData = Object.entries(paymentModes).map(([name, value]) => ({ name: name.charAt(0).toUpperCase() + name.slice(1), value }));
 
   return (
