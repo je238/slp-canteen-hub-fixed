@@ -26,6 +26,10 @@ import DailyReportPage from "./pages/DailyReportPage";
 import ActivityLogPage from "./pages/ActivityLogPage";
 import CanteenPage from "./pages/CanteenPage";
 import FraudMonitorPage from "./pages/FraudMonitorPage";
+import KitchenPage from "./pages/KitchenPage";
+import QROrderPage from "./pages/QROrderPage";
+import QRCodesPage from "./pages/QRCodesPage";
+import VendorsPage from "./pages/VendorsPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,10 +52,14 @@ const App = () => (
               <Routes>
                 {/* Public */}
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/order/:canteenId" element={<QROrderPage />} />
 
                 {/* Cashier+ */}
                 <Route path="/pos" element={
                   <ProtectedRoute minRole="cashier"><POSPage /></ProtectedRoute>
+                } />
+                <Route path="/kitchen" element={
+                  <ProtectedRoute minRole="cashier"><KitchenPage /></ProtectedRoute>
                 } />
 
                 {/* Manager+ */}
@@ -81,6 +89,12 @@ const App = () => (
                 } />
                 <Route path="/reports" element={
                   <ProtectedRoute minRole="manager"><ReportsPage /></ProtectedRoute>
+                } />
+                <Route path="/qr-codes" element={
+                  <ProtectedRoute minRole="manager"><QRCodesPage /></ProtectedRoute>
+                } />
+                <Route path="/vendors" element={
+                  <ProtectedRoute minRole="manager"><VendorsPage /></ProtectedRoute>
                 } />
 
                 {/* Owner only */}

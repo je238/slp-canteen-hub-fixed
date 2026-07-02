@@ -21,6 +21,9 @@ import {
   LogOut,
   MessageCircle,
   Activity,
+  Flame,
+  QrCode,
+  Store,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
@@ -28,9 +31,12 @@ import { toast } from "sonner";
 const allNavItems = [
   { path: "/", icon: LayoutDashboard, label: "Dashboard", minRole: "manager" as const },
   { path: "/pos", icon: ShoppingCart, label: "POS Billing", minRole: "cashier" as const },
+  { path: "/kitchen", icon: Flame, label: "Kitchen Display", minRole: "cashier" as const },
+  { path: "/qr-codes", icon: QrCode, label: "QR Ordering", minRole: "manager" as const },
   { path: "/inventory", icon: Package, label: "Inventory", minRole: "manager" as const },
   { path: "/recipes", icon: ChefHat, label: "Recipes", minRole: "manager" as const },
   { path: "/purchases", icon: Truck, label: "Purchases", minRole: "manager" as const },
+  { path: "/vendors", icon: Store, label: "Vendors", minRole: "manager" as const },
   { path: "/invoice-scan", icon: ScanLine, label: "Invoice Scan", minRole: "manager" as const },
   { path: "/expenses", icon: Wallet, label: "Expenses", minRole: "manager" as const },
   { path: "/stock-audit", icon: ClipboardCheck, label: "Stock Audit", minRole: "manager" as const },

@@ -24,8 +24,10 @@ export default function Dashboard() {
 
   const activeFraudAlerts = fraudAlerts?.filter(a => a.status === 'open') || [];
 
-  const totalSales = orders?.reduce((s: number, o: any) => s + Number(o.total_amount), 0) || 0;
-  const totalOrders = orders?.length || 0;
+  // Only settled sales count as revenue — unpaid QR orders and cancellations are excluded
+  const settledOrders = orders?.filter((o: any) => (o.status ?? "completed") === "completed") || [];
+  const totalSales = settledOrders.reduce((s: number, o: any) => s + Number(o.total_amount), 0);
+  const totalOrders = settledOrders.length;
   const lowStockItems = ingredients?.filter((i: any) => Number(i.current_stock) < Number(i.minimum_stock)) || [];
   const totalExpenses = expenses?.reduce((s: number, e: any) => s + Number(e.amount), 0) || 0;
   const totalPurchaseCost = purchases?.filter((p: any) => p.status === "confirmed").reduce((s: number, p: any) => s + Number(p.total_amount), 0) || 0;
@@ -39,10 +41,10 @@ export default function Dashboard() {
   ];
 
   // Per canteen sales
-  const salesByCanteen = orders?.reduce((acc: Record<string, number>, o: any) => {
+  const salesByCanteen = settledOrders.reduce((acc: Record<string, number>, o: any) => {
     acc[o.canteen_id] = (acc[o.canteen_id] || 0) + Number(o.total_amount);
     return acc;
-  }, {} as Record<string, number>) || {};
+  }, {} as Record<string, number>);
 
   const canteenSalesData = canteens?.map((c: any) => ({
     name: c.name.replace(" Canteen", "").replace(" Dining", ""),

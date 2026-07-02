@@ -10,6 +10,7 @@ import { Search, Plus, Minus, Trash2, CreditCard, Banknote, Smartphone } from "l
 import { toast } from "sonner";
 import ReceiptPrint from "@/components/ReceiptPrint";
 import KOTPrint from "@/components/KOTPrint";
+import { QRSettleButton } from "@/components/QRSettleDrawer";
 
 interface CartItem {
   id: string;
@@ -115,9 +116,12 @@ export default function POSPage() {
       <div className="flex flex-col lg:flex-row gap-4 animate-fade-in" style={{ minHeight: "calc(100vh - 8rem)" }}>
         {/* Menu */}
         <div className="flex-1 space-y-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input placeholder="Search menu..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-10" />
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input placeholder="Search menu..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-10" />
+            </div>
+            <QRSettleButton canteenId={selectedCanteen} />
           </div>
 
           <div className="flex gap-1.5 overflow-x-auto pb-1">

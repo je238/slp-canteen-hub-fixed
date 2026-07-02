@@ -99,12 +99,23 @@ export function useCreateOrder() {
       payment_mode: string;
       total_amount: number;
     }) => {
-      const { data: order, error } = await supabase
+      // POS orders are paid up-front and also feed the Kitchen Display queue.
+      // If the KDS migration hasn't been applied yet, fall back to the legacy
+      // insert so billing never breaks.
+      let { data: order, error } = await supabase
         .from("orders")
-        .insert({ canteen_id, total_amount, payment_mode })
+        .insert({ canteen_id, total_amount, payment_mode, kitchen_status: "new", order_type: "pos", payment_status: "paid" })
         .select()
         .single();
+      if (error && (error.code === "PGRST204" || /kitchen_status|order_type|payment_status/.test(error.message || ""))) {
+        ({ data: order, error } = await supabase
+          .from("orders")
+          .insert({ canteen_id, total_amount, payment_mode })
+          .select()
+          .single());
+      }
       if (error) throw error;
+      if (!order) throw new Error("Order creation failed");
 
       const orderItems = items.map((i) => ({ ...i, order_id: order.id }));
       const { error: itemsErr } = await supabase.from("order_items").insert(orderItems);
@@ -114,6 +125,7 @@ export function useCreateOrder() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["kitchenQueue"] });
     },
   });
 }
@@ -154,6 +166,36 @@ export function useAddSupplier() {
       return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["suppliers"] }),
+  });
+}
+
+export function useUpdateSupplier() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...fields }: { id: string; name?: string; contact_person?: string; phone?: string; email?: string; address?: string }) => {
+      const { data, error } = await supabase.from("suppliers").update(fields).eq("id", id).select().single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["suppliers"] }),
+  });
+}
+
+// Purchases for one vendor with their line items (price history)
+export function useVendorPurchases(supplierId?: string) {
+  return useQuery({
+    queryKey: ["vendorPurchases", supplierId],
+    enabled: !!supplierId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("purchases")
+        .select("*, purchase_items(*)")
+        .eq("supplier_id", supplierId!)
+        .order("created_at", { ascending: false })
+        .limit(25);
+      if (error) throw error;
+      return data;
+    },
   });
 }
 

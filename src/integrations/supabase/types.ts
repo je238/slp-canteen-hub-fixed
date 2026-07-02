@@ -313,9 +313,17 @@ export type Database = {
           canteen_id: string
           created_at: string
           created_by: string | null
+          customer_name: string | null
           id: string
+          kitchen_status: string
           order_number: string
+          order_type: string
           payment_mode: string
+          payment_status: string
+          preparing_at: string | null
+          ready_at: string | null
+          served_at: string | null
+          special_instructions: string | null
           status: string
           total_amount: number
         }
@@ -323,9 +331,17 @@ export type Database = {
           canteen_id: string
           created_at?: string
           created_by?: string | null
+          customer_name?: string | null
           id?: string
-          order_number: string
+          kitchen_status?: string
+          order_number?: string
+          order_type?: string
           payment_mode?: string
+          payment_status?: string
+          preparing_at?: string | null
+          ready_at?: string | null
+          served_at?: string | null
+          special_instructions?: string | null
           status?: string
           total_amount?: number
         }
@@ -333,9 +349,17 @@ export type Database = {
           canteen_id?: string
           created_at?: string
           created_by?: string | null
+          customer_name?: string | null
           id?: string
+          kitchen_status?: string
           order_number?: string
+          order_type?: string
           payment_mode?: string
+          payment_status?: string
+          preparing_at?: string | null
+          ready_at?: string | null
+          served_at?: string | null
+          special_instructions?: string | null
           status?: string
           total_amount?: number
         }

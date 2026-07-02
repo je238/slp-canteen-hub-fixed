@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 type TableName = "orders" | "ingredients" | "purchases" | "expenses";
 
 const tableToQueryKeys: Record<TableName, string[]> = {
-  orders: ["orders"],
+  orders: ["orders", "kitchenQueue", "kitchenServed", "qrUnsettled", "trackOrder"],
   ingredients: ["ingredients"],
   purchases: ["purchases"],
   expenses: ["expenses"],
