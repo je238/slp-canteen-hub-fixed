@@ -19,6 +19,11 @@ export default function ReportsPage() {
   const todayOrders = settledOrders.filter((o: any) => new Date(o.created_at).toDateString() === new Date().toDateString());
   const todaySales = todayOrders.reduce((s: number, o: any) => s + Number(o.total_amount), 0);
   const totalSales = settledOrders.reduce((s: number, o: any) => s + Number(o.total_amount), 0);
+  // Cancelled AFTER payment was taken: this cash is in the drawer but not in
+  // sales — surface it so end-of-day counts reconcile.
+  const voidedPaid = (orders || [])
+    .filter((o: any) => o.status === "cancelled" && (o.payment_status ?? "paid") === "paid")
+    .reduce((s: number, o: any) => s + Number(o.total_amount), 0);
   const totalExpenses = expenses?.reduce((s: number, e: any) => s + Number(e.amount), 0) || 0;
   const totalPurchases = purchases?.filter((p: any) => p.status === "confirmed").reduce((s: number, p: any) => s + Number(p.total_amount), 0) || 0;
   const estimatedProfit = totalSales - totalExpenses - totalPurchases;
@@ -52,10 +57,11 @@ export default function ReportsPage() {
     <AppLayout title="Reports">
       <div className="space-y-4 animate-fade-in">
         {/* Summary KPIs */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
           {[
             { label: "Today's Sales", value: `₹${todaySales.toLocaleString()}` },
             { label: "Total Sales", value: `₹${totalSales.toLocaleString()}` },
+            { label: "Voided (paid)", value: `₹${voidedPaid.toLocaleString()}` },
             { label: "Total Purchases", value: `₹${totalPurchases.toLocaleString()}` },
             { label: "Total Expenses", value: `₹${totalExpenses.toLocaleString()}` },
             { label: "Est. Profit", value: `₹${estimatedProfit.toLocaleString()}`, highlight: true },

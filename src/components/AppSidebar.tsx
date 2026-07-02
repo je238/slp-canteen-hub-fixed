@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -63,6 +64,14 @@ export default function AppSidebar() {
   const navItems = allNavItems.filter(
     item => ROLE_RANK[userRole] >= ROLE_RANK[item.minRole]
   );
+
+  // Managers and cashiers are scoped to one canteen — lock the app to it
+  // instead of leaving them on the useless "All Canteens" view.
+  useEffect(() => {
+    if (roleData?.canteen_id && selectedCanteen === "all") {
+      setSelectedCanteen(roleData.canteen_id);
+    }
+  }, [roleData?.canteen_id, selectedCanteen, setSelectedCanteen]);
 
   const handleSignOut = async () => {
     await signOut();

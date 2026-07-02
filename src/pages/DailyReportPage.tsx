@@ -22,6 +22,10 @@ export default function DailyReportPage() {
   const dateOrders = orders?.filter((o: any) =>
     o.created_at?.startsWith(reportDate) && (o.status ?? "completed") === "completed"
   ) || [];
+  // Paid orders cancelled after payment: cash is in the drawer but not in sales
+  const voidedPaid = (orders || [])
+    .filter((o: any) => o.created_at?.startsWith(reportDate) && o.status === "cancelled" && (o.payment_status ?? "paid") === "paid")
+    .reduce((s: number, o: any) => s + Number(o.total_amount || 0), 0);
   const dateExpenses = expenses?.filter((e: any) => e.expense_date === reportDate) || [];
   const totalSales = dateOrders.reduce((s: number, o: any) => s + Number(o.total_amount || 0), 0);
   const totalExpenses = dateExpenses.reduce((s: number, e: any) => s + Number(e.amount || 0), 0);
@@ -47,7 +51,8 @@ export default function DailyReportPage() {
   const sendWhatsApp = () => {
     const topItemsText = topItems.length ? topItems.map(([name, d], i) => `  ${i+1}. ${name} - Rs.${d.amount} (${d.count} sold)`).join("\n") : "  No items sold";
     const paymentText = Object.entries(paymentBreakdown).map(([mode, amount]) => `  ${mode.toUpperCase()}: Rs.${amount}`).join("\n");
-    const report = `Daily Sales Report\n${canteenName}\n${new Date(reportDate).toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}\n\nSales Summary\n  Total Sales: Rs.${totalSales.toLocaleString()}\n  Total Bills: ${totalBills}\n  Avg Bill: Rs.${totalBills?Math.round(totalSales/totalBills):0}\n\nPayment Breakdown\n${paymentText||"  No payments"}\n\nTop Selling Items\n${topItemsText}\n\nExpenses: Rs.${totalExpenses.toLocaleString()}\n\nNet Profit: Rs.${netProfit.toLocaleString()}\n\nSent from SLP Canteen Hub`;
+    const voidedText = voidedPaid > 0 ? `\nVoided after payment: Rs.${voidedPaid.toLocaleString()} (cash in drawer, not in sales)\n` : "";
+    const report = `Daily Sales Report\n${canteenName}\n${new Date(reportDate).toLocaleDateString("en-IN",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}\n\nSales Summary\n  Total Sales: Rs.${totalSales.toLocaleString()}\n  Total Bills: ${totalBills}\n  Avg Bill: Rs.${totalBills?Math.round(totalSales/totalBills):0}\n${voidedText}\nPayment Breakdown\n${paymentText||"  No payments"}\n\nTop Selling Items\n${topItemsText}\n\nExpenses: Rs.${totalExpenses.toLocaleString()}\n\nNet Profit: Rs.${netProfit.toLocaleString()}\n\nSent from SLP Canteen Hub`;
     const number = whatsappNumber.replace(/\D/g, "");
     window.open(`https://wa.me/${number||""}?text=${encodeURIComponent(report)}`, "_blank");
     toast.success("Opening WhatsApp!");

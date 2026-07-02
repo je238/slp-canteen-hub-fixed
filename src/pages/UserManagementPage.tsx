@@ -31,15 +31,14 @@ export default function UserManagementPage() {
   const [role, setRole] = useState<"manager" | "cashier">("cashier");
   const [canteenId, setCanteenId] = useState("");
 
-  // Fetch all user roles
+  // Fetch users (with emails) via the owner-only edge function
   const { data: userRoles, isLoading } = useQuery({
     queryKey: ["userRoles"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("user_roles")
-        .select("id, user_id, role, canteen_id, created_at");
-      if (error) throw error;
-      return data;
+      const { data, error } = await supabase.functions.invoke("admin-create-user", { method: "GET" });
+      if (error) throw new Error(error.message || "Could not load users");
+      if (data?.error) throw new Error(data.error);
+      return data?.users || [];
     },
     enabled: isOwner,
   });
@@ -50,28 +49,15 @@ export default function UserManagementPage() {
       if ((role === "manager" || role === "cashier") && !canteenId) {
         throw new Error("Select a canteen for this role");
       }
-
-      // Create auth user via admin API (requires service_role — done via Supabase Edge Function)
-      // For now, we use signUp then assign role
-      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { emailRedirectTo: window.location.origin },
+      const { data, error } = await supabase.functions.invoke("admin-create-user", {
+        body: { email, password, role, canteen_id: canteenId || null },
       });
-      if (signUpErr) throw signUpErr;
-      if (!signUpData.user) throw new Error("Failed to create user");
-
-      const { error: roleErr } = await supabase.from("user_roles").insert({
-        user_id: signUpData.user.id,
-        role,
-        canteen_id: canteenId || null,
-      });
-      if (roleErr) throw roleErr;
-
-      return signUpData.user;
+      if (error) throw new Error(error.message || "Failed to create user");
+      if (data?.error) throw new Error(data.error);
+      return data;
     },
     onSuccess: () => {
-      toast.success("User created! They'll receive a confirmation email.");
+      toast.success("Account created — they can sign in right away (no confirmation email needed).");
       qc.invalidateQueries({ queryKey: ["userRoles"] });
       setDialogOpen(false);
       setEmail(""); setPassword(""); setRole("cashier"); setCanteenId("");
@@ -195,7 +181,7 @@ export default function UserManagementPage() {
                         <UserCheck className="w-4 h-4 text-accent" />
                       </div>
                       <div>
-                        <p className="text-xs text-muted-foreground font-mono">{ur.user_id.slice(0, 16)}…</p>
+                        <p className="text-sm font-medium">{ur.email || `${ur.user_id.slice(0, 16)}…`}</p>
                         <p className="text-xs text-muted-foreground">{getCanteenName(ur.canteen_id)}</p>
                       </div>
                     </div>

@@ -373,6 +373,168 @@ export type Database = {
           },
         ]
       }
+      user_roles: {
+        Row: {
+          id: string
+          user_id: string
+          role: string
+          canteen_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          role: string
+          canteen_id?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          role?: string
+          canteen_id?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      api_keys: {
+        Row: {
+          id: string
+          key_hash: string
+          label: string
+          created_by: string | null
+          revoked: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          key_hash: string
+          label: string
+          created_by?: string | null
+          revoked?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          key_hash?: string
+          label?: string
+          created_by?: string | null
+          revoked?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
+      fraud_alerts: {
+        Row: {
+          id: string
+          canteen_id: string
+          alert_type: string
+          ingredient_id: string | null
+          purchase_id: string | null
+          title: string
+          description: string
+          severity: string
+          status: string
+          expected_value: number | null
+          actual_value: number | null
+          loss_value: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          canteen_id: string
+          alert_type: string
+          ingredient_id?: string | null
+          purchase_id?: string | null
+          title: string
+          description: string
+          severity: string
+          status?: string
+          expected_value?: number | null
+          actual_value?: number | null
+          loss_value?: number | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          canteen_id?: string
+          alert_type?: string
+          ingredient_id?: string | null
+          purchase_id?: string | null
+          title?: string
+          description?: string
+          severity?: string
+          status?: string
+          expected_value?: number | null
+          actual_value?: number | null
+          loss_value?: number | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fraud_alerts_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fraud_alerts_purchase_id_fkey"
+            columns: ["purchase_id"]
+            isOneToOne: false
+            referencedRelation: "purchases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ingredient_usage_log: {
+        Row: {
+          id: string
+          canteen_id: string
+          order_id: string | null
+          menu_item_id: string | null
+          ingredient_id: string | null
+          quantity_used: number
+          unit: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          canteen_id: string
+          order_id?: string | null
+          menu_item_id?: string | null
+          ingredient_id?: string | null
+          quantity_used: number
+          unit: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          canteen_id?: string
+          order_id?: string | null
+          menu_item_id?: string | null
+          ingredient_id?: string | null
+          quantity_used?: number
+          unit?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ingredient_usage_log_ingredient_id_fkey"
+            columns: ["ingredient_id"]
+            isOneToOne: false
+            referencedRelation: "ingredients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ingredient_usage_log_menu_item_id_fkey"
+            columns: ["menu_item_id"]
+            isOneToOne: false
+            referencedRelation: "menu_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       purchase_items: {
         Row: {
           confidence_score: number | null
@@ -724,7 +886,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      place_qr_order: {
+        Args: {
+          p_canteen_id: string
+          p_items: Json
+          p_customer_name?: string | null
+          p_instructions?: string | null
+        }
+        Returns: Json
+      }
+      get_qr_order: {
+        Args: { p_order_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

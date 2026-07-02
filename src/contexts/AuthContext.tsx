@@ -17,27 +17,50 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-const DEFAULT_ROLE: UserRoleData = { role: "owner", canteen_id: null };
+// Until a role row is assigned by an owner, a signed-in user gets the most
+// restricted role and no canteen — RLS enforces the same on the server.
+const NO_ROLE: UserRoleData = { role: "cashier", canteen_id: null };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [roleData] = useState<UserRoleData>(DEFAULT_ROLE);
+  const [roleData, setRoleData] = useState<UserRoleData>(NO_ROLE);
   // Must start true: rendering protected routes with loading=false and no
   // session yet bounces logged-in users to /login on every page refresh.
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const loadRole = async (s: Session | null) => {
+      if (!s?.user) {
+        if (!cancelled) { setRoleData(NO_ROLE); setLoading(false); }
+        return;
+      }
+      const { data } = await supabase
+        .from("user_roles")
+        .select("role, canteen_id")
+        .eq("user_id", s.user.id)
+        .maybeSingle();
+      if (!cancelled) {
+        setRoleData(data ? { role: data.role as UserRole, canteen_id: data.canteen_id } : NO_ROLE);
+        setLoading(false);
+      }
+    };
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return;
       setSession(session);
       setUser(session?.user ?? null);
-      setLoading(false);
+      loadRole(session);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return;
       setSession(session);
       setUser(session?.user ?? null);
+      loadRole(session);
     });
-    return () => subscription.unsubscribe();
+    return () => { cancelled = true; subscription.unsubscribe(); };
   }, []);
 
   const signIn = async (email: string, password: string) => {
@@ -48,13 +71,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => { await supabase.auth.signOut(); };
 
+  const isOwner = roleData.role === "owner";
+  const isManagerOrAbove = isOwner || roleData.role === "manager";
+
   return (
     <AuthContext.Provider value={{
       session, user, roleData, loading,
       signIn, signOut,
-      isOwner: true,
-      isManagerOrAbove: true,
-      canAccessCanteen: () => true,
+      isOwner,
+      isManagerOrAbove,
+      canAccessCanteen: (canteenId: string) => isOwner || roleData.canteen_id === canteenId,
     }}>
       {children}
     </AuthContext.Provider>

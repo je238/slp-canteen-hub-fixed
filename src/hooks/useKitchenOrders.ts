@@ -1,6 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { orderTotals } from "@/lib/pricing";
 
 export type KitchenStatus = "new" | "preparing" | "ready" | "served" | "cancelled";
 
@@ -145,9 +144,9 @@ export function useUpdateKitchenStatus() {
   });
 }
 
-// Place a self-service QR order. Prices are re-read from menu_items so a
-// tampered client can't set its own totals. Stays "unpaid" until the
-// cashier settles it at the counter.
+// Place a self-service QR order through the hardened place_qr_order RPC:
+// the server validates items, reads prices from the DB, applies GST, and
+// enforces queue/quantity caps. Anonymous users have no table access.
 export function useCreateQROrder() {
   const qc = useQueryClient();
   return useMutation({
@@ -157,51 +156,20 @@ export function useCreateQROrder() {
       customer_name?: string;
       special_instructions?: string;
     }) => {
-      const ids = items.map((i) => i.menu_item_id);
-      const { data: menuRows, error: menuErr } = await supabase
-        .from("menu_items")
-        .select("id, name, price, available")
-        .in("id", ids)
-        .eq("canteen_id", canteen_id);
-      if (menuErr) throw menuErr;
-
-      const byId = new Map((menuRows || []).map((m) => [m.id, m]));
-      const orderItems = items.map((i) => {
-        const m = byId.get(i.menu_item_id);
-        if (!m || !m.available) throw new Error("An item in your order is no longer available. Please refresh the menu.");
-        return {
-          menu_item_id: m.id,
-          item_name: m.name,
-          quantity: i.quantity,
-          unit_price: Number(m.price),
-          total_price: Number(m.price) * i.quantity,
-        };
+      const { data, error } = await supabase.rpc("place_qr_order", {
+        p_canteen_id: canteen_id,
+        p_items: items,
+        p_customer_name: customer_name || null,
+        p_instructions: special_instructions || null,
       });
-
-      const { subtotal, gst, total } = orderTotals(orderItems.reduce((s, i) => s + i.total_price, 0));
-
-      const { data: order, error } = await supabase
-        .from("orders")
-        .insert({
-          canteen_id,
-          total_amount: total,
-          payment_mode: "counter",
-          status: "pending",
-          kitchen_status: "new",
-          order_type: "qr",
-          payment_status: "unpaid",
-          customer_name: customer_name || null,
-          special_instructions: special_instructions || null,
-        })
-        .select()
-        .single();
       if (error) throw error;
-
-      const rows = orderItems.map((i) => ({ ...i, order_id: order.id }));
-      const { error: itemsErr } = await supabase.from("order_items").insert(rows);
-      if (itemsErr) throw itemsErr;
-
-      return { order, subtotal, gst, total };
+      const result = data as { id: string; order_number: string; subtotal: number; gst: number; total_amount: number };
+      return {
+        order: { id: result.id, order_number: result.order_number },
+        subtotal: Number(result.subtotal),
+        gst: Number(result.gst),
+        total: Number(result.total_amount),
+      };
     },
     onSuccess: () => {
       for (const key of ORDER_QUERY_KEYS) qc.invalidateQueries({ queryKey: [key] });
@@ -209,8 +177,9 @@ export function useCreateQROrder() {
   });
 }
 
-// Live tracking of a single order (QR customer view). Stops polling once
-// the order reaches a terminal state — abandoned tabs shouldn't poll forever.
+// Live tracking of a single order (QR customer view) via the get_qr_order
+// RPC — anonymous users cannot read the orders table directly. Stops polling
+// once the order reaches a terminal state.
 export function useTrackOrder(orderId?: string) {
   return useQuery({
     queryKey: ["trackOrder", orderId],
@@ -220,13 +189,9 @@ export function useTrackOrder(orderId?: string) {
       return s === "served" || s === "cancelled" ? false : 5000;
     },
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("orders")
-        .select("*, order_items(*)")
-        .eq("id", orderId!)
-        .maybeSingle();
+      const { data, error } = await supabase.rpc("get_qr_order", { p_order_id: orderId! });
       if (error) throw error;
-      return data as KitchenOrder | null;
+      return (data ?? null) as unknown as KitchenOrder | null;
     },
   });
 }

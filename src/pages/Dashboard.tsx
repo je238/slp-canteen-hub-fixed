@@ -1,16 +1,34 @@
+import { useMemo, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
-import { useOrders, useIngredients, useExpenses, usePurchases, useCanteens, useFraudAlerts } from "@/hooks/useSupabaseData";
+import { useOrdersSince, useIngredients, useExpenses, usePurchases, useCanteens, useFraudAlerts } from "@/hooks/useSupabaseData";
 import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { IndianRupee, ShoppingCart, AlertTriangle, TrendingUp, ArrowUpRight, ShieldAlert } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { formatCurrency } from "@/lib/utils";
 
+type Period = "today" | "7d" | "30d";
+const PERIODS: { key: Period; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "7d", label: "7 days" },
+  { key: "30d", label: "30 days" },
+];
+
+function periodStart(period: Period): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  if (period === "7d") d.setDate(d.getDate() - 6);
+  if (period === "30d") d.setDate(d.getDate() - 29);
+  return d.toISOString();
+}
+
 export default function Dashboard() {
   const { selectedCanteen } = useAppContext();
   useRealtimeSubscription(["orders", "ingredients", "expenses", "purchases"]);
-  const { data: orders } = useOrders(selectedCanteen);
+  const [period, setPeriod] = useState<Period>("today");
+  const since = useMemo(() => periodStart(period), [period]);
+  const { data: orders } = useOrdersSince(selectedCanteen, since);
   const { data: ingredients } = useIngredients(selectedCanteen);
   const { data: expenses } = useExpenses(selectedCanteen);
   const { data: purchases } = usePurchases(selectedCanteen);
@@ -19,13 +37,15 @@ export default function Dashboard() {
 
   const activeFraudAlerts = fraudAlerts?.filter(a => a.status === 'open') || [];
 
-  // Only settled sales count as revenue — unpaid QR orders and cancellations are excluded
+  // Only settled sales count as revenue — unpaid QR orders and cancellations are excluded.
+  // Expenses and purchases are filtered to the same period so profit compares like with like.
   const settledOrders = orders?.filter((o: any) => (o.status ?? "completed") === "completed") || [];
   const totalSales = settledOrders.reduce((s: number, o: any) => s + Number(o.total_amount), 0);
   const totalOrders = settledOrders.length;
   const lowStockItems = ingredients?.filter((i: any) => Number(i.current_stock) < Number(i.minimum_stock)) || [];
-  const totalExpenses = expenses?.reduce((s: number, e: any) => s + Number(e.amount), 0) || 0;
-  const totalPurchaseCost = purchases?.filter((p: any) => p.status === "confirmed").reduce((s: number, p: any) => s + Number(p.total_amount), 0) || 0;
+  const sinceDate = since.slice(0, 10);
+  const totalExpenses = expenses?.filter((e: any) => e.expense_date >= sinceDate).reduce((s: number, e: any) => s + Number(e.amount), 0) || 0;
+  const totalPurchaseCost = purchases?.filter((p: any) => p.status === "confirmed" && p.created_at >= since).reduce((s: number, p: any) => s + Number(p.total_amount), 0) || 0;
   const estimatedProfit = totalSales - totalExpenses - totalPurchaseCost;
 
   const kpiCards = [
@@ -49,6 +69,20 @@ export default function Dashboard() {
   return (
     <AppLayout title="Owner Dashboard">
       <div className="space-y-6 animate-fade-in">
+        <div className="flex gap-1.5">
+          {PERIODS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setPeriod(p.key)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                period === p.key ? "bg-accent text-accent-foreground" : "bg-secondary text-secondary-foreground hover:bg-muted"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {kpiCards.map((kpi) => (
             <Card key={kpi.label} className="border-none shadow-sm">

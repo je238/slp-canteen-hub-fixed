@@ -131,6 +131,25 @@ export function useCreateOrder() {
   });
 }
 
+// All orders since a given ISO timestamp (no row cap) — KPI queries must
+// not be distorted by a "most recent N rows" window.
+export function useOrdersSince(canteenId: string | undefined, sinceIso: string) {
+  return useQuery({
+    queryKey: ["ordersSince", canteenId, sinceIso],
+    queryFn: async () => {
+      let q = supabase
+        .from("orders")
+        .select("id, canteen_id, total_amount, status, payment_status, payment_mode, created_at")
+        .gte("created_at", sinceIso)
+        .order("created_at", { ascending: false });
+      if (canteenId && canteenId !== "all") q = q.eq("canteen_id", canteenId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data;
+    },
+  });
+}
+
 export function useOrders(canteenId?: string) {
   return useQuery({
     queryKey: ["orders", canteenId],
