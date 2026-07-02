@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
-import { useIngredients, useCreatePurchase } from "@/hooks/useSupabaseData";
+import { useIngredients, useCreatePurchase, useSuppliers } from "@/hooks/useSupabaseData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,19 @@ interface ScannedItem {
   matched: boolean;
   ingredient_id?: string;
   confidence_score: number;
+}
+
+// Header fields extracted by the ocr-invoice function (all nullable —
+// older deployments of the function don't return `invoice` at all).
+interface InvoiceMeta {
+  vendor_name: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  gstin: string | null;
+  subtotal: number | null;
+  tax_amount: number | null;
+  other_charges: number | null;
+  grand_total: number | null;
 }
 
 function fuzzyMatch(scannedName: string, ingredients: any[]): { ingredient_id: string; confidence: number } | null {
@@ -57,12 +70,15 @@ async function fileToBase64(file: File): Promise<string> {
 export default function InvoiceScanPage() {
   const { selectedCanteen } = useAppContext();
   const { data: ingredients } = useIngredients(selectedCanteen);
+  const { data: suppliers } = useSuppliers(selectedCanteen);
   const createPurchase = useCreatePurchase();
   const navigate = useNavigate();
 
   const [step, setStep] = useState<"upload" | "review" | "done">("upload");
   const [fileName, setFileName] = useState("");
   const [scannedItems, setScannedItems] = useState<ScannedItem[]>([]);
+  const [invoiceMeta, setInvoiceMeta] = useState<InvoiceMeta | null>(null);
+  const [supplierId, setSupplierId] = useState<string>("");
   const [processing, setProcessing] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -140,6 +156,17 @@ export default function InvoiceScanPage() {
     });
     if (matched.length === 0) { toast.warning("No items extracted. Try a clearer photo."); setProcessing(false); return; }
     setScannedItems(matched);
+
+    // Header fields + vendor auto-match (older function deployments return no `invoice`)
+    const meta: InvoiceMeta | null = data?.invoice || null;
+    setInvoiceMeta(meta);
+    if (meta?.vendor_name && suppliers?.length) {
+      const vendorMatch = fuzzyMatch(meta.vendor_name, suppliers);
+      setSupplierId(vendorMatch && vendorMatch.confidence >= 0.5 ? vendorMatch.ingredient_id : "");
+    } else {
+      setSupplierId("");
+    }
+
     setStep("review");
     toast.success(`Extracted ${matched.length} items!`);
     setProcessing(false);
@@ -176,21 +203,30 @@ export default function InvoiceScanPage() {
   const handleConfirmDraft = async () => {
     if (selectedCanteen === "all") { toast.error("Select a canteen first"); return; }
     try {
+      const metaBits = [
+        invoiceMeta?.invoice_number ? `Invoice ${invoiceMeta.invoice_number}` : null,
+        invoiceMeta?.invoice_date || null,
+        invoiceMeta?.gstin ? `GSTIN ${invoiceMeta.gstin}` : null,
+        invoiceMeta?.grand_total ? `Grand total ₹${invoiceMeta.grand_total}` : null,
+      ].filter(Boolean).join(" · ");
       await createPurchase.mutateAsync({
         canteen_id: selectedCanteen,
+        supplier_id: supplierId || undefined,
         items: scannedItems.map(item => ({
           item_name: item.item_name, quantity: item.quantity, unit: item.unit,
           rate: item.rate, total: item.total, ingredient_id: item.ingredient_id,
           confidence_score: item.confidence_score, matched: item.matched,
         })),
-        notes: `Scanned from invoice: ${fileName}`,
+        notes: metaBits ? `${metaBits} · Scanned from ${fileName}` : `Scanned from invoice: ${fileName}`,
+        // The vendor is owed the grand total (incl. GST/freight), not the pre-tax item sum
+        total_override: invoiceMeta?.grand_total ?? undefined,
       });
       toast.success("Draft purchase created!");
       setStep("done");
     } catch (err: any) { toast.error(err.message); }
   };
 
-  const reset = () => { setStep("upload"); setFileName(""); setScannedItems([]); setCapturedImage(null); stopCamera(); };
+  const reset = () => { setStep("upload"); setFileName(""); setScannedItems([]); setInvoiceMeta(null); setSupplierId(""); setCapturedImage(null); stopCamera(); };
 
   return (
     <AppLayout title="Invoice Scan">
@@ -292,6 +328,51 @@ export default function InvoiceScanPage() {
 
         {step === "review" && (
           <>
+            {/* Invoice header details (only when the function returned them) */}
+            {invoiceMeta && (
+              <Card className="border-none shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-semibold">Invoice Details</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="col-span-2">
+                      <Label className="text-[10px]">Vendor {invoiceMeta.vendor_name ? `— read as "${invoiceMeta.vendor_name}"` : ""}</Label>
+                      <select
+                        className="w-full h-8 text-xs border rounded px-2 bg-card mt-1"
+                        value={supplierId}
+                        onChange={e => setSupplierId(e.target.value)}
+                      >
+                        <option value="">— No vendor linked —</option>
+                        {suppliers?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      {invoiceMeta.vendor_name && !supplierId && (
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          No matching vendor found — add "{invoiceMeta.vendor_name}" on the Vendors page to auto-match next time.
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <Label className="text-[10px]">Invoice No.</Label>
+                      <Input className="h-8 text-xs mt-1" value={invoiceMeta.invoice_number || ""} onChange={e => setInvoiceMeta({ ...invoiceMeta, invoice_number: e.target.value })} />
+                    </div>
+                    <div>
+                      <Label className="text-[10px]">Date</Label>
+                      <Input className="h-8 text-xs mt-1" value={invoiceMeta.invoice_date || ""} onChange={e => setInvoiceMeta({ ...invoiceMeta, invoice_date: e.target.value })} />
+                    </div>
+                  </div>
+                  {(invoiceMeta.tax_amount || invoiceMeta.other_charges || invoiceMeta.grand_total) && (
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 mt-3 pt-3 border-t text-xs text-muted-foreground">
+                      {invoiceMeta.subtotal != null && <span>Taxable: ₹{invoiceMeta.subtotal.toLocaleString()}</span>}
+                      {invoiceMeta.tax_amount != null && invoiceMeta.tax_amount > 0 && <span>GST: ₹{invoiceMeta.tax_amount.toLocaleString()}</span>}
+                      {invoiceMeta.other_charges != null && invoiceMeta.other_charges > 0 && <span>Freight/other: ₹{invoiceMeta.other_charges.toLocaleString()}</span>}
+                      {invoiceMeta.grand_total != null && <span className="font-semibold text-foreground">Payable: ₹{invoiceMeta.grand_total.toLocaleString()}</span>}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             <Card className="border-none shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -336,7 +417,11 @@ export default function InvoiceScanPage() {
             <div className="flex justify-between items-center">
               <Button variant="outline" onClick={reset}>Start Over</Button>
               <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold">Total: ₹{scannedItems.reduce((s, i) => s + i.total, 0).toLocaleString()}</span>
+                <span className="text-sm font-semibold">
+                  {invoiceMeta?.grand_total
+                    ? <>Payable: ₹{invoiceMeta.grand_total.toLocaleString()}</>
+                    : <>Total: ₹{scannedItems.reduce((s, i) => s + i.total, 0).toLocaleString()}</>}
+                </span>
                 <Button onClick={handleConfirmDraft} disabled={createPurchase.isPending} className="bg-accent text-accent-foreground hover:bg-accent/90 gap-1.5">
                   <Check className="w-4 h-4" /> Create Draft Purchase
                 </Button>

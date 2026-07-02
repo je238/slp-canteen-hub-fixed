@@ -231,14 +231,16 @@ export function usePurchaseItems(purchaseId?: string) {
 export function useCreatePurchase() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ canteen_id, supplier_id, items, notes, invoice_image_url }: {
+    mutationFn: async ({ canteen_id, supplier_id, items, notes, invoice_image_url, total_override }: {
       canteen_id: string;
       supplier_id?: string;
       items: { item_name: string; quantity: number; unit: string; rate: number; total: number; ingredient_id?: string; confidence_score?: number; matched?: boolean }[];
       notes?: string;
       invoice_image_url?: string;
+      // e.g. an invoice's grand total (incl. GST/freight) — reconciles with what the vendor is actually owed
+      total_override?: number;
     }) => {
-      const total_amount = items.reduce((s, i) => s + i.total, 0);
+      const total_amount = total_override ?? items.reduce((s, i) => s + i.total, 0);
       const { data: purchase, error } = await supabase
         .from("purchases")
         .insert({ canteen_id, supplier_id, total_amount, notes, invoice_image_url, status: "draft" })
