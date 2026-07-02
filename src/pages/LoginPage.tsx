@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Building2, Eye, EyeOff, Lock, Mail } from "lucide-react";
@@ -8,12 +8,18 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 
 export default function LoginPage() {
-  const { signIn, roleData } = useAuth();
+  const { signIn, roleData, session } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Already signed in (e.g. landed here from a refresh race or a bookmark):
+  // don't ask for credentials again.
+  useEffect(() => {
+    if (session) navigate(roleData?.role === "cashier" ? "/pos" : "/", { replace: true });
+  }, [session, roleData, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

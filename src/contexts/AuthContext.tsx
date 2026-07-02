@@ -23,12 +23,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [roleData] = useState<UserRoleData>(DEFAULT_ROLE);
-  const [loading] = useState(false);
+  // Must start true: rendering protected routes with loading=false and no
+  // session yet bounces logged-in users to /login on every page refresh.
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
+      setLoading(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);

@@ -33,3 +33,7 @@ dist-ssr
 
 # Supabase CLI temp
 supabase/.temp/
+
+# UX walkthrough artifacts
+ux-shots/
+ux-walkthrough.mjs
