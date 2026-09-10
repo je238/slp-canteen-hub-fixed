@@ -37,3 +37,9 @@ supabase/.temp/
 # UX walkthrough artifacts
 ux-shots/
 ux-walkthrough.mjs
+
+# Android build outputs
+android/app/build/
+android/build/
+android/.gradle/
+android/app/slp-release.keystore

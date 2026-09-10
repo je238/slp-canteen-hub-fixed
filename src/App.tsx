@@ -4,32 +4,35 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AppProvider } from "@/contexts/AppContext";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import LoginPage from "./pages/LoginPage";
-import Dashboard from "./pages/Dashboard";
-import POSPage from "./pages/POSPage";
+import NotFound from "./pages/NotFound";
+
+// SRS modules
+import MenuPlanningPage from "./pages/MenuPlanningPage";
+import RequisitionsPage from "./pages/RequisitionsPage";
+import BudgetPage from "./pages/BudgetPage";
+import VendorBillsPage from "./pages/VendorBillsPage";
+import ReportsCenterPage from "./pages/ReportsCenterPage";
+import SitePerformancePage from "./pages/SitePerformancePage";
+import ComparisonPage from "./pages/ComparisonPage";
 import InventoryPage from "./pages/InventoryPage";
-import RecipesPage from "./pages/RecipesPage";
 import PurchasesPage from "./pages/PurchasesPage";
 import InvoiceScanPage from "./pages/InvoiceScanPage";
-import ExpensesPage from "./pages/ExpensesPage";
-import StaffPage from "./pages/StaffPage";
-import ReportsPage from "./pages/ReportsPage";
-import StockAuditPage from "./pages/StockAuditPage";
-import UserManagementPage from "./pages/UserManagementPage";
-import ApiKeysPage from "./pages/ApiKeysPage";
-import NotFound from "./pages/NotFound";
-import PurchaseOrderPage from "./pages/PurchaseOrderPage";
-import DailyReportPage from "./pages/DailyReportPage";
-import ActivityLogPage from "./pages/ActivityLogPage";
-import CanteenPage from "./pages/CanteenPage";
-import FraudMonitorPage from "./pages/FraudMonitorPage";
-import KitchenPage from "./pages/KitchenPage";
-import QROrderPage from "./pages/QROrderPage";
-import QRCodesPage from "./pages/QRCodesPage";
+import MenuScanPage from "./pages/MenuScanPage";
+import DashboardPage from "./pages/DashboardPage";
+import { homeFor } from "@/lib/navigation";
 import VendorsPage from "./pages/VendorsPage";
+import StockAuditPage from "./pages/StockAuditPage";
+import RecipesPage from "./pages/RecipesPage";
+import ExpensesPage from "./pages/ExpensesPage";
+import UserManagementPage from "./pages/UserManagementPage";
+import CanteenPage from "./pages/CanteenPage";
+import AuditLogPage from "./pages/AuditLogPage";
+import ExecutiveAlertsPage from "./pages/ExecutiveAlertsPage";
+import CentralKitchenPage from "./pages/CentralKitchenPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,6 +42,20 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Every role lands on the screen it actually works from, so nobody starts
+// on a page their permissions immediately bounce them off.
+function RoleHome() {
+  const { roleData, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+  return <Navigate to={homeFor(roleData?.role)} replace />;
+}
 
 const App = () => (
   <ErrorBoundary>
@@ -50,66 +67,91 @@ const App = () => (
               <Toaster />
               <Sonner />
               <Routes>
-                {/* Public */}
                 <Route path="/login" element={<LoginPage />} />
-                <Route path="/order/:canteenId" element={<QROrderPage />} />
 
-                {/* Cashier+ */}
-                <Route path="/pos" element={
-                  <ProtectedRoute minRole="cashier"><POSPage /></ProtectedRoute>
-                } />
-                <Route path="/kitchen" element={
-                  <ProtectedRoute minRole="cashier"><KitchenPage /></ProtectedRoute>
-                } />
-
-                {/* Manager+ */}
                 <Route path="/" element={
-                  <ProtectedRoute minRole="manager"><Dashboard /></ProtectedRoute>
+                  <ProtectedRoute><RoleHome /></ProtectedRoute>
                 } />
+
+                <Route path="/dashboard" element={
+                  <ProtectedRoute minRole="store_keeper"><DashboardPage /></ProtectedRoute>
+                } />
+
+                {/* Planning & approval workflow */}
+                <Route path="/menu-planning" element={
+                  <ProtectedRoute minRole="chef"><MenuPlanningPage /></ProtectedRoute>
+                } />
+                <Route path="/menu-scan" element={
+                  <ProtectedRoute minRole="unit_manager"><MenuScanPage /></ProtectedRoute>
+                } />
+                <Route path="/requisitions" element={
+                  <ProtectedRoute minRole="store_keeper"><RequisitionsPage /></ProtectedRoute>
+                } />
+
+                {/* Store keeper: purchase & inventory modules */}
                 <Route path="/inventory" element={
-                  <ProtectedRoute minRole="manager"><InventoryPage /></ProtectedRoute>
+                  <ProtectedRoute minRole="store_keeper"><InventoryPage /></ProtectedRoute>
                 } />
-                <Route path="/recipes" element={
-                  <ProtectedRoute minRole="manager"><RecipesPage /></ProtectedRoute>
+                <Route path="/central-kitchen" element={
+                  <ProtectedRoute minRole="store_keeper"><CentralKitchenPage /></ProtectedRoute>
                 } />
                 <Route path="/purchases" element={
-                  <ProtectedRoute minRole="manager"><PurchasesPage /></ProtectedRoute>
+                  <ProtectedRoute minRole="store_keeper"><PurchasesPage /></ProtectedRoute>
                 } />
                 <Route path="/invoice-scan" element={
-                  <ProtectedRoute minRole="manager"><InvoiceScanPage /></ProtectedRoute>
-                } />
-                <Route path="/expenses" element={
-                  <ProtectedRoute minRole="manager"><ExpensesPage /></ProtectedRoute>
+                  <ProtectedRoute minRole="store_keeper"><InvoiceScanPage /></ProtectedRoute>
                 } />
                 <Route path="/stock-audit" element={
-                  <ProtectedRoute minRole="manager"><StockAuditPage /></ProtectedRoute>
+                  <ProtectedRoute minRole="store_keeper"><StockAuditPage /></ProtectedRoute>
                 } />
-                <Route path="/staff" element={
-                  <ProtectedRoute minRole="manager"><StaffPage /></ProtectedRoute>
+                <Route path="/vendor-bills" element={
+                  <ProtectedRoute minRole="store_keeper"><VendorBillsPage /></ProtectedRoute>
                 } />
-                <Route path="/reports" element={
-                  <ProtectedRoute minRole="manager"><ReportsPage /></ProtectedRoute>
-                } />
-                <Route path="/qr-codes" element={
-                  <ProtectedRoute minRole="manager"><QRCodesPage /></ProtectedRoute>
-                } />
+
+                {/* Masters */}
                 <Route path="/vendors" element={
-                  <ProtectedRoute minRole="manager"><VendorsPage /></ProtectedRoute>
+                  <ProtectedRoute minRole="store_keeper"><VendorsPage /></ProtectedRoute>
+                } />
+                <Route path="/recipes" element={
+                  <ProtectedRoute minRole="chef"><RecipesPage /></ProtectedRoute>
+                } />
+                <Route path="/expenses" element={
+                  <ProtectedRoute minRole="unit_manager"><ExpensesPage /></ProtectedRoute>
                 } />
 
-                {/* Owner only */}
+                {/* Budget & reporting */}
+                <Route path="/budgets" element={
+                  <ProtectedRoute minRole="unit_manager"><BudgetPage /></ProtectedRoute>
+                } />
+                <Route path="/reports-center" element={
+                  <ProtectedRoute minRole="unit_manager"><ReportsCenterPage /></ProtectedRoute>
+                } />
+                <Route path="/site-performance" element={
+                  <ProtectedRoute minRole="ops_manager"><SitePerformancePage /></ProtectedRoute>
+                } />
+                <Route path="/comparison" element={
+                  <ProtectedRoute minRole="ops_manager"><ComparisonPage /></ProtectedRoute>
+                } />
+
+                {/* Administration */}
+                <Route path="/canteens" element={
+                  <ProtectedRoute minRole="unit_manager"><CanteenPage /></ProtectedRoute>
+                } />
                 <Route path="/users" element={
-                  <ProtectedRoute minRole="owner"><UserManagementPage /></ProtectedRoute>
+                  <ProtectedRoute minRole="admin"><UserManagementPage /></ProtectedRoute>
                 } />
-                <Route path="/api-keys" element={
-                  <ProtectedRoute minRole="owner"><ApiKeysPage /></ProtectedRoute>
+                <Route path="/audit-log" element={
+                  <ProtectedRoute minRole="ops_manager"><AuditLogPage /></ProtectedRoute>
+                } />
+                <Route path="/executive-alerts" element={
+                  <ProtectedRoute minRole="ops_manager"><ExecutiveAlertsPage /></ProtectedRoute>
                 } />
 
-                <Route path="/purchase-orders" element={<PurchaseOrderPage />} />
-                <Route path="/daily-report" element={<DailyReportPage />} />
-                <Route path="/activity" element={<ActivityLogPage />} />
-                <Route path="/canteens" element={<CanteenPage />} />
-                <Route path="/fraud-monitor" element={<ProtectedRoute minRole="manager"><FraudMonitorPage /></ProtectedRoute>} />
+                {/* Vendors have exactly one screen */}
+                <Route path="/vendor-portal" element={
+                  <ProtectedRoute minRole="vendor"><VendorBillsPage /></ProtectedRoute>
+                } />
+
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </AppProvider>
@@ -121,4 +163,3 @@ const App = () => (
 );
 
 export default App;
-

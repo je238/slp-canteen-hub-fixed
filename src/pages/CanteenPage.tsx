@@ -40,8 +40,11 @@ export default function CanteenPage() {
 
   const deleteCanteen = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("canteens").delete().eq("id", id);
+      // Blocked by the security rules? That returns success with no rows,
+      // so confirm the row actually went instead of trusting a clean error.
+      const { data, error } = await supabase.from("canteens").delete().eq("id", id).select("id");
       if (error) throw error;
+      if (!data || data.length === 0) throw new Error("You are not allowed to delete this site");
     },
     onSuccess: () => {
       toast.success("Canteen deleted");

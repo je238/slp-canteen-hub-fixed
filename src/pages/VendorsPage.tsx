@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
+import { useAuth, rankOf } from "@/contexts/AuthContext";
 import { useSuppliers, usePurchases, useAddSupplier, useUpdateSupplier, useVendorPurchases } from "@/hooks/useSupabaseData";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import {
 import { Store, Plus, Search, Phone, Mail, Pencil, IndianRupee, Clock, PackageOpen } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/utils";
+import { fmtDate } from "@/lib/date";
 
 interface VendorForm {
   name: string;
@@ -99,7 +101,7 @@ function VendorFormDialog({ open, onOpenChange, initial, vendorId, canteenId }: 
   );
 }
 
-function VendorDetailDialog({ vendor, onClose, onEdit }: { vendor: any; onClose: () => void; onEdit: () => void }) {
+function VendorDetailDialog({ vendor, onClose, onEdit, canEdit }: { vendor: any; onClose: () => void; onEdit: () => void; canEdit: boolean }) {
   const { data: purchases, isLoading } = useVendorPurchases(vendor?.id);
 
   return (
@@ -108,9 +110,11 @@ function VendorDetailDialog({ vendor, onClose, onEdit }: { vendor: any; onClose:
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between gap-2 pr-6">
             {vendor?.name}
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={onEdit}>
-              <Pencil className="w-3 h-3" /> Edit
-            </Button>
+            {canEdit && (
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={onEdit}>
+                <Pencil className="w-3 h-3" /> Edit
+              </Button>
+            )}
           </DialogTitle>
           <DialogDescription className="space-y-0.5">
             {vendor?.contact_person && <span className="block">{vendor.contact_person}</span>}
@@ -132,7 +136,7 @@ function VendorDetailDialog({ vendor, onClose, onEdit }: { vendor: any; onClose:
                 <div key={p.id} className="rounded-lg border p-3">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs text-muted-foreground">
-                      {new Date(p.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                      {fmtDate(p.created_at)}
                     </span>
                     <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
                       p.status === "confirmed" ? "bg-emerald-500/15 text-emerald-600" : "bg-amber-500/15 text-amber-600"
@@ -167,6 +171,8 @@ function VendorDetailDialog({ vendor, onClose, onEdit }: { vendor: any; onClose:
 
 export default function VendorsPage() {
   const { selectedCanteen } = useAppContext();
+  const { roleData } = useAuth();
+  const canEditExisting = rankOf(roleData?.role) >= rankOf("unit_manager");
   const { data: vendors, isLoading } = useSuppliers(selectedCanteen);
   const { data: purchases } = usePurchases(selectedCanteen);
   const [search, setSearch] = useState("");
@@ -284,7 +290,12 @@ export default function VendorsPage() {
           address: editVendor.address || "",
         } : EMPTY_FORM}
       />
-      <VendorDetailDialog vendor={detailVendor} onClose={() => setDetailVendor(null)} onEdit={() => openEdit(detailVendor)} />
+      <VendorDetailDialog
+        vendor={detailVendor}
+        onClose={() => setDetailVendor(null)}
+        onEdit={() => openEdit(detailVendor)}
+        canEdit={canEditExisting}
+      />
     </AppLayout>
   );
 }

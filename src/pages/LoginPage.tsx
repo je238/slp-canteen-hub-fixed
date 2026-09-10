@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { Building2, Eye, EyeOff, Lock, Mail } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,22 +41,24 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-sm space-y-8">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-orange-50 via-background to-slate-100 flex items-center justify-center p-4">
+      <div className="pointer-events-none absolute -left-28 -top-28 h-72 w-72 rounded-full bg-accent/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-32 -right-24 h-80 w-80 rounded-full bg-primary/10 blur-3xl" />
+      <div className="relative w-full max-w-sm space-y-6">
         {/* Logo */}
         <div className="text-center space-y-2">
-          <div className="w-14 h-14 rounded-2xl bg-accent flex items-center justify-center mx-auto">
-            <Building2 className="w-7 h-7 text-accent-foreground" />
+          <div className="mx-auto h-24 w-24 overflow-hidden rounded-2xl border border-orange-100 bg-[#f8f7ef] p-2 shadow-sm">
+            <img src="/slp-logo.png" alt="SLP Hospitality logo" className="h-full w-full object-contain" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">SLP Hospitality</h1>
-          <p className="text-sm text-muted-foreground">Canteen Management System</p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">SLP Hospitality</h1>
+          <p className="text-sm text-muted-foreground">Smart Canteen Management</p>
         </div>
 
         {/* Form */}
-        <div className="bg-card rounded-xl border shadow-sm p-6 space-y-5">
+        <div className="rounded-2xl border border-border/80 bg-card/95 p-6 shadow-xl shadow-slate-900/5 backdrop-blur space-y-5">
           <div>
-            <h2 className="text-base font-semibold text-foreground">Sign in to your account</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Enter your credentials to continue</p>
+            <h2 className="text-lg font-semibold text-foreground">Welcome back</h2>
+            <p className="text-sm text-muted-foreground mt-0.5">Apne work account se sign in karein</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -91,6 +93,7 @@ export default function LoginPage() {
                   type="button"
                   onClick={() => setShowPassword(v => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -99,23 +102,15 @@ export default function LoginPage() {
 
             <Button
               type="submit"
-              className="w-full bg-accent text-accent-foreground hover:bg-accent/90"
+              className="h-11 w-full bg-accent text-accent-foreground shadow-sm hover:bg-accent/90"
               disabled={loading}
             >
-              {loading ? "Signing in..." : "Sign in"}
+              {loading ? "Signing in..." : "Sign in securely"}
             </Button>
           </form>
         </div>
 
-        {/* Role info */}
-        <div className="bg-muted/50 rounded-lg p-4 space-y-2 text-xs text-muted-foreground">
-          <p className="font-medium text-foreground">Access levels:</p>
-          <div className="space-y-1">
-            <p>🔑 <strong>Owner</strong> — Full access to all canteens & settings</p>
-            <p>🏪 <strong>Manager</strong> — Full access to their assigned canteen</p>
-            <p>💳 <strong>Cashier</strong> — POS billing only for their canteen</p>
-          </div>
-        </div>
+        <p className="text-center text-xs text-muted-foreground">Powered by SLP Hospitality</p>
       </div>
     </div>
   );

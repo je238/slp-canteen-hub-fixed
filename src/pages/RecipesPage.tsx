@@ -1,268 +1,290 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
-import { useRecipes, useAddRecipe, useIngredients } from "@/hooks/useSupabaseData";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useIngredients, useRecipes } from "@/hooks/useSupabaseData";
+import { useSaveDishRecipe } from "@/hooks/useSrsData";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { Plus, ChefHat, Trash2, Beaker } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Check, ChefHat, ChevronsUpDown, Pencil, Plus, Search, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
-const recipeCategories = ["Main", "Starter", "Dessert", "Beverage", "Side", "Bread", "Curry"];
-
-interface RecipeIngredientForm {
-  type: "ingredient" | "sub_recipe";
-  ingredient_id?: string;
-  sub_recipe_id?: string;
-  quantity: number;
-  unit: string;
-}
+const BASE_UNITS = ["kg", "litre", "packet", "pcs", "box"];
+type RecipeLine = { ingredient_id: string; quantity: string; unit: string };
+type Ingredient = { id: string; name: string; unit: string | null };
+type SavedRecipeLine = {
+  id: string; ingredient_id: string | null; quantity: number | string; unit: string;
+  ingredients?: { name: string; unit: string | null } | null;
+};
+type SavedRecipe = {
+  id: string; name: string; yield_qty: number | string | null;
+  recipe_ingredients?: SavedRecipeLine[] | null;
+};
+const emptyLine = (): RecipeLine => ({ ingredient_id: "", quantity: "", unit: "kg" });
 
 export default function RecipesPage() {
   const { selectedCanteen } = useAppContext();
-  const { data: recipes, isLoading } = useRecipes(selectedCanteen);
+  const { data: recipes, isLoading, isError, isFetching, refetch } = useRecipes(selectedCanteen);
   const { data: ingredients } = useIngredients(selectedCanteen);
-  const addRecipe = useAddRecipe();
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const saveRecipe = useSaveDishRecipe();
+  const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<SavedRecipe | null>(null);
+  const [dishName, setDishName] = useState("");
+  const [people, setPeople] = useState("100");
+  const [lines, setLines] = useState<RecipeLine[]>([emptyLine()]);
 
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState("Main");
-  const [isSemiFinished, setIsSemiFinished] = useState(false);
-  const [yieldQty, setYieldQty] = useState(1);
-  const [yieldUnit, setYieldUnit] = useState("portion");
-  const [instructions, setInstructions] = useState("");
-  const [recipeIngredients, setRecipeIngredients] = useState<RecipeIngredientForm[]>([]);
+  const sortedIngredients = useMemo(() => ((ingredients || []) as Ingredient[]).slice()
+    .sort((a, b) => a.name.localeCompare(b.name)), [ingredients]);
+  const units = useMemo(() => Array.from(new Set([
+    ...BASE_UNITS,
+    ...sortedIngredients.map((i) => String(i.unit || "").trim()).filter(Boolean),
+  ])), [sortedIngredients]);
+  const visibleRecipes = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return ((recipes || []) as SavedRecipe[]).filter((r) => !q || r.name.toLowerCase().includes(q));
+  }, [recipes, search]);
 
-  const semiFinishedRecipes = recipes?.filter((r: any) => r.is_semi_finished) || [];
-
-  const addIngredientRow = () => {
-    setRecipeIngredients([...recipeIngredients, { type: "ingredient", quantity: 0, unit: "kg" }]);
+  const startNew = () => {
+    setEditing(null); setDishName(""); setPeople("100"); setLines([emptyLine()]); setOpen(true);
   };
 
-  const removeIngredientRow = (idx: number) => {
-    setRecipeIngredients(recipeIngredients.filter((_, i) => i !== idx));
+  const startEdit = (recipe: SavedRecipe) => {
+    setEditing(recipe);
+    setDishName(recipe.name || "");
+    setPeople(String(Number(recipe.yield_qty) > 0 ? recipe.yield_qty : 100));
+    setLines(recipe.recipe_ingredients?.some((r) => r.ingredient_id)
+      ? recipe.recipe_ingredients.filter((r) => r.ingredient_id).map((r) => ({
+          ingredient_id: r.ingredient_id, quantity: String(r.quantity || ""),
+          unit: r.unit || r.ingredients?.unit || "kg",
+        }))
+      : [emptyLine()]);
+    setOpen(true);
   };
 
-  const updateIngredientRow = (idx: number, updates: Partial<RecipeIngredientForm>) => {
-    setRecipeIngredients(recipeIngredients.map((r, i) => (i === idx ? { ...r, ...updates } : r)));
-  };
+  const updateLine = (index: number, update: Partial<RecipeLine>) =>
+    setLines((current) => current.map((line, i) => i === index ? { ...line, ...update } : line));
 
-  const handleSubmit = async () => {
-    if (!name || selectedCanteen === "all") {
-      toast.error("Please select a canteen and enter recipe name");
-      return;
+  const save = async () => {
+    const name = dishName.trim();
+    const count = Number(people);
+    const clean = lines.filter((line) => line.ingredient_id && Number(line.quantity) > 0);
+    if (selectedCanteen === "all") { toast.error("Pehle site select karein"); return; }
+    if (!name) { toast.error("Dish ka naam bharo"); return; }
+    if (!(count > 0)) { toast.error("Recipe kitne logon ke liye hai, woh bharo"); return; }
+    if (clean.length === 0) { toast.error("Kam se kam ek saman aur quantity bharo"); return; }
+    if (new Set(clean.map((line) => line.ingredient_id)).size !== clean.length) {
+      toast.error("Ek saman do baar hai—quantity ek hi line me jodo"); return;
     }
-
     try {
-      await addRecipe.mutateAsync({
-        recipe: {
-          canteen_id: selectedCanteen,
-          name,
-          category,
-          is_semi_finished: isSemiFinished,
-          yield_qty: yieldQty,
-          yield_unit: yieldUnit,
-          instructions: instructions || undefined,
-        },
-        ingredients: recipeIngredients.map((r) => ({
-          ingredient_id: r.type === "ingredient" ? r.ingredient_id : undefined,
-          sub_recipe_id: r.type === "sub_recipe" ? r.sub_recipe_id : undefined,
-          quantity: r.quantity,
-          unit: r.unit,
+      const result = await saveRecipe.mutateAsync({
+        canteen_id: selectedCanteen, dish_name: name, yield_qty: count, yield_unit: "plate",
+        items: clean.map((line) => ({
+          ingredient_id: line.ingredient_id, quantity: Number(line.quantity), unit: line.unit,
         })),
       });
-      toast.success("Recipe created!");
-      setDialogOpen(false);
-      resetForm();
-    } catch (err: any) {
-      toast.error(err.message);
+      const linked = Number(result?.menu_lines_linked || 0);
+      toast.success(`${name} ki recipe save ho gayi${linked ? `—${linked} menu me link hui` : ""}`);
+      setOpen(false);
+    } catch (error: unknown) {
+      toast.error(error instanceof Error ? error.message : "Recipe save nahi hui");
     }
-  };
-
-  const resetForm = () => {
-    setName("");
-    setCategory("Main");
-    setIsSemiFinished(false);
-    setYieldQty(1);
-    setYieldUnit("portion");
-    setInstructions("");
-    setRecipeIngredients([]);
   };
 
   return (
-    <AppLayout title="Recipe Management">
-      <div className="space-y-4 animate-fade-in">
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">{recipes?.length || 0} recipes</p>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-accent text-accent-foreground hover:bg-accent/90 gap-1.5" size="sm">
-                <Plus className="w-4 h-4" /> Add Recipe
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>New Recipe</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 mt-2">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">Recipe Name</Label>
-                    <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Paneer Butter Masala" />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Category</Label>
-                    <Select value={category} onValueChange={setCategory}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {recipeCategories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
+    <AppLayout title="Recipes">
+      <div className="mx-auto max-w-5xl space-y-4 animate-fade-in">
+        <Card className="border-accent/25 bg-accent/5 shadow-sm">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ChefHat className="h-5 w-5 text-accent" /><h2 className="text-lg font-bold">Chef Recipe Book</h2>
                 </div>
-
-                <div className="flex items-center gap-3">
-                  <Switch checked={isSemiFinished} onCheckedChange={setIsSemiFinished} />
-                  <Label className="text-sm">Semi-finished item (used as ingredient in other recipes)</Label>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">Yield Quantity</Label>
-                    <Input type="number" value={yieldQty} onChange={(e) => setYieldQty(Number(e.target.value))} />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Yield Unit</Label>
-                    <Input value={yieldUnit} onChange={(e) => setYieldUnit(e.target.value)} placeholder="portion, kg, litre" />
-                  </div>
-                </div>
-
-                <div>
-                  <Label className="text-xs">Instructions (optional)</Label>
-                  <Textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={3} />
-                </div>
-
-                {/* Recipe Ingredients */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <Label className="text-sm font-semibold">Ingredients</Label>
-                    <Button variant="outline" size="sm" onClick={addIngredientRow} className="gap-1 text-xs">
-                      <Plus className="w-3 h-3" /> Add Ingredient
-                    </Button>
-                  </div>
-                  <div className="space-y-2">
-                    {recipeIngredients.map((ri, idx) => (
-                      <div key={idx} className="flex gap-2 items-end p-2 rounded bg-muted">
-                        <div className="w-28">
-                          <Label className="text-[10px]">Type</Label>
-                          <Select value={ri.type} onValueChange={(v: "ingredient" | "sub_recipe") => updateIngredientRow(idx, { type: v, ingredient_id: undefined, sub_recipe_id: undefined })}>
-                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="ingredient">Raw Material</SelectItem>
-                              <SelectItem value="sub_recipe">Semi-Finished</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="flex-1">
-                          <Label className="text-[10px]">{ri.type === "ingredient" ? "Ingredient" : "Sub-Recipe"}</Label>
-                          {ri.type === "ingredient" ? (
-                            <Select value={ri.ingredient_id || ""} onValueChange={(v) => updateIngredientRow(idx, { ingredient_id: v })}>
-                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select..." /></SelectTrigger>
-                              <SelectContent>
-                                {ingredients?.map((ing: any) => (
-                                  <SelectItem key={ing.id} value={ing.id}>{ing.name} ({ing.unit})</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <Select value={ri.sub_recipe_id || ""} onValueChange={(v) => updateIngredientRow(idx, { sub_recipe_id: v })}>
-                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select..." /></SelectTrigger>
-                              <SelectContent>
-                                {semiFinishedRecipes.map((r: any) => (
-                                  <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        </div>
-                        <div className="w-20">
-                          <Label className="text-[10px]">Qty</Label>
-                          <Input type="number" className="h-8 text-xs" value={ri.quantity} onChange={(e) => updateIngredientRow(idx, { quantity: Number(e.target.value) })} />
-                        </div>
-                        <div className="w-20">
-                          <Label className="text-[10px]">Unit</Label>
-                          <Input className="h-8 text-xs" value={ri.unit} onChange={(e) => updateIngredientRow(idx, { unit: e.target.value })} />
-                        </div>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeIngredientRow(idx)}>
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    ))}
-                    {recipeIngredients.length === 0 && (
-                      <p className="text-xs text-muted-foreground text-center py-4">No ingredients added yet</p>
-                    )}
-                  </div>
-                </div>
-
-                <Button onClick={handleSubmit} disabled={addRecipe.isPending} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
-                  {addRecipe.isPending ? "Creating..." : "Create Recipe"}
-                </Button>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Ek baar recipe save karo. Agli baar app headcount ke hisaab se saman khud calculate karega.
+                </p>
               </div>
-            </DialogContent>
-          </Dialog>
+              <Button className="h-11 shrink-0" onClick={startNew}>
+                <Plus className="mr-2 h-4 w-4" /> Nayi recipe dalo
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-sm">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Recipe search karo…" className="h-10 pl-9" />
+          </div>
+          {!isLoading && !isError && <p className="text-xs text-muted-foreground">{visibleRecipes.length} recipes</p>}
         </div>
 
-        {/* Recipe List */}
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="py-10 text-center text-sm text-muted-foreground">Recipes loading…</p>
+        ) : isError ? (
+          <Card className="border-destructive/30 shadow-none"><CardContent className="p-6 text-center" role="alert">
+            <p className="font-medium">Recipes load nahi ho paayi</p>
+            <p className="mt-1 text-sm text-muted-foreground">Iska matlab recipes delete hona nahi hai. Dobara load karein; recipe phir se mat bharein.</p>
+            <Button className="mt-4" variant="outline" disabled={isFetching} onClick={() => void refetch()}>
+              {isFetching ? "Load ho rahi hain…" : "Dobara load karo"}
+            </Button>
+          </CardContent></Card>
+        ) : visibleRecipes.length === 0 ? (
+          <Card className="border-dashed shadow-none"><CardContent className="p-10 text-center">
+            <ChefHat className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+            <p className="font-medium">Abhi koi recipe nahi mili</p>
+            <p className="mt-1 text-sm text-muted-foreground">{search.trim() ? "Is naam se recipe nahi mili. Search badal kar dekhein." : "Pehli recipe add karke ordering ko simple banao."}</p>
+            <Button className="mt-4" onClick={startNew}><Plus className="mr-1 h-4 w-4" /> Recipe dalo</Button>
+          </CardContent></Card>
         ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {recipes?.map((recipe: any) => (
-              <Card key={recipe.id} className="border-none shadow-sm">
+          <div className="grid gap-3 md:grid-cols-2">
+            {visibleRecipes.map((recipe) => (
+              <Card key={recipe.id} className="shadow-sm">
                 <CardContent className="p-4">
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h4 className="font-semibold text-sm">{recipe.name}</h4>
-                      <p className="text-xs text-muted-foreground">{recipe.category}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate font-bold">{recipe.name}</h3>
+                      <Badge variant="secondary" className="mt-1 text-[10px]">
+                        <Users className="mr-1 h-3 w-3" /> Recipe for {Number(recipe.yield_qty || 0)} people
+                      </Badge>
                     </div>
-                    {recipe.is_semi_finished ? (
-                      <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-info/10 text-info">
-                        <Beaker className="w-3 h-3" /> Semi-finished
-                      </span>
-                    ) : (
-                      <ChefHat className="w-4 h-4 text-muted-foreground" />
-                    )}
+                    <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={() => startEdit(recipe)}>
+                      <Pencil className="mr-1 h-3.5 w-3.5" /> Badlo
+                    </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground mb-2">
-                    Yield: {recipe.yield_qty} {recipe.yield_unit}
-                  </p>
-                  {recipe.recipe_ingredients?.length > 0 && (
-                    <div className="border-t pt-2">
-                      <p className="text-[10px] font-medium text-muted-foreground mb-1">Ingredients:</p>
-                      {recipe.recipe_ingredients.map((ri: any) => (
-                        <p key={ri.id} className="text-xs">
-                          {ri.ingredients?.name || "Sub-recipe"} — {ri.quantity} {ri.unit}
-                        </p>
-                      ))}
-                    </div>
-                  )}
+                  <div className="mt-3 space-y-1.5 border-t pt-3">
+                    {(recipe.recipe_ingredients || []).filter((r) => r.ingredient_id).length === 0 ? (
+                      <p className="text-xs text-destructive">Is recipe me saman abhi set nahi hai.</p>
+                    ) : (recipe.recipe_ingredients || []).filter((r) => r.ingredient_id).map((line) => (
+                      <div key={line.id} className="flex items-center justify-between gap-3 text-sm">
+                        <span className="truncate">{line.ingredients?.name || "Unknown item"}</span>
+                        <b className="shrink-0">{Number(line.quantity)} {line.unit}</b>
+                      </div>
+                    ))}
+                  </div>
                 </CardContent>
               </Card>
             ))}
-            {recipes?.length === 0 && (
-              <div className="col-span-full text-center py-12">
-                <ChefHat className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">No recipes yet. Create your first recipe!</p>
-              </div>
-            )}
           </div>
         )}
       </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-xl max-h-[92vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader><DialogTitle>{editing ? `${editing.name} ki recipe badlo` : "Nayi recipe dalo"}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="font-semibold">Dish ka naam</Label>
+              <Input value={dishName} onChange={(e) => setDishName(e.target.value)} disabled={!!editing}
+                placeholder="Jaise: Dal Tadka" className="h-11" />
+              {editing && <p className="text-[11px] text-muted-foreground">Naam same rahega; niche saman aur quantity badal sakte hain.</p>}
+            </div>
+
+            <div className="rounded-xl border border-accent/25 bg-accent/5 p-3">
+              <Label className="font-semibold">Ye quantity kitne logon ke liye hai?</Label>
+              <div className="relative mt-2 max-w-52">
+                <Input type="number" min={1} inputMode="numeric" value={people}
+                  onChange={(e) => setPeople(e.target.value)} className="h-11 pr-14 text-base font-bold" />
+                <span className="absolute right-3 top-3 text-sm text-muted-foreground">log</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div><p className="font-semibold">Kaunsa saman kitna lagega?</p>
+                <p className="text-xs text-muted-foreground">Inventory ka item search karo aur total quantity bharo.</p>
+              </div>
+              {lines.map((line, index) => (
+                <div key={index} className="space-y-2 rounded-xl border p-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold">Saman {index + 1}</Label>
+                    {lines.length > 1 && <Button variant="ghost" size="sm" className="h-7 px-2 text-destructive"
+                      onClick={() => setLines((current) => current.filter((_, i) => i !== index))}>
+                      <Trash2 className="mr-1 h-3.5 w-3.5" /> Hatao
+                    </Button>}
+                  </div>
+                  <IngredientPicker value={line.ingredient_id} ingredients={sortedIngredients}
+                    onChange={(id) => {
+                      const item = sortedIngredients.find((i) => i.id === id);
+                      updateLine(index, { ingredient_id: id, unit: item?.unit || line.unit });
+                    }} />
+                  <div className="grid grid-cols-[1fr_112px] gap-2">
+                    <div className="space-y-1"><Label className="text-xs">Total quantity</Label>
+                      <Input type="number" min={0} step="any" inputMode="decimal" value={line.quantity}
+                        onChange={(e) => updateLine(index, { quantity: e.target.value })} className="h-11" placeholder="0" />
+                    </div>
+                    <div className="space-y-1"><Label className="text-xs">Unit</Label>
+                      <Select value={line.unit} onValueChange={(unit) => updateLine(index, { unit })}>
+                        <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
+                        <SelectContent>{units.map((unit) => <SelectItem key={unit} value={unit}>{unit}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {Number(line.quantity) > 0 && Number(people) > 0 && (
+                    <p className="text-[11px] text-muted-foreground">{perPerson(Number(line.quantity), line.unit, Number(people))}</p>
+                  )}
+                </div>
+              ))}
+              <Button variant="outline" className="h-11 w-full border-dashed"
+                onClick={() => setLines((current) => [...current, emptyLine()])}>
+                <Plus className="mr-1 h-4 w-4" /> Aur saman jodo
+              </Button>
+            </div>
+          </div>
+          <DialogFooter className="sticky -bottom-4 mt-4 flex-row gap-2 border-t bg-background pt-3 sm:-bottom-6">
+            <Button variant="outline" className="flex-1" onClick={() => setOpen(false)}>Band karo</Button>
+            <Button className="flex-[2]" disabled={saveRecipe.isPending} onClick={save}>
+              {saveRecipe.isPending ? "Save ho raha hai…" : "Recipe save karo"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
+}
+
+function perPerson(quantity: number, unit: string, people: number) {
+  const each = quantity / people;
+  const normalized = String(unit).toLowerCase();
+  if (normalized === "kg") return `Lagbhag ${(each * 1000).toLocaleString("en-IN", { maximumFractionDigits: 1 })} gram per person`;
+  if (["litre", "liter"].includes(normalized)) return `Lagbhag ${(each * 1000).toLocaleString("en-IN", { maximumFractionDigits: 1 })} ml per person`;
+  return `Lagbhag ${each.toLocaleString("en-IN", { maximumFractionDigits: 3 })} ${unit} per person`;
+}
+
+function IngredientPicker({ value, ingredients, onChange }: {
+  value: string; ingredients: Ingredient[]; onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = ingredients.find((item) => item.id === value);
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild>
+      <Button type="button" variant="outline" role="combobox" aria-expanded={open}
+        className="h-11 w-full justify-between font-normal">
+        <span className={selected ? "truncate" : "truncate text-muted-foreground"}>
+          {selected?.name || "Saman search karke chuno"}
+        </span>
+        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </Button>
+    </PopoverTrigger>
+    <PopoverContent className="w-[min(440px,calc(100vw-2rem))] p-0" align="start">
+      <Command><CommandInput placeholder="Item ka naam likho…" />
+        <CommandList className="max-h-64"><CommandEmpty>Inventory me item nahi mila.</CommandEmpty>
+          <CommandGroup>{ingredients.map((item) => (
+            <CommandItem key={item.id} value={item.name} onSelect={() => { onChange(item.id); setOpen(false); }}>
+              <Check className={`mr-2 h-4 w-4 ${value === item.id ? "opacity-100" : "opacity-0"}`} />
+              <span className="truncate">{item.name}</span>
+              <span className="ml-auto pl-2 text-xs text-muted-foreground">{item.unit}</span>
+            </CommandItem>
+          ))}</CommandGroup>
+        </CommandList>
+      </Command>
+    </PopoverContent>
+  </Popover>;
 }

@@ -1,73 +1,68 @@
-# Welcome to your Lovable project
+# SLP Canteen Hub
 
-## Project info
+Inventory and canteen management for SLP Hospitality Incorporation.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+Runs the daily cycle at Eicher, Dewas (Units 1, 2 and 3): the client's menu
+comes in, the kitchen orders against it, the store issues it, and the plates
+served are counted and billed.
 
-## How can I edit this code?
+**Live:** https://slp-canteen-hub-fixed.vercel.app
+**Android:** `SLP-Canteen-Hub-v1.2.apk` — a shell over the live site, so every
+web deploy reaches every phone without reinstalling.
 
-There are several ways of editing your application.
+## The day
 
-**Use Lovable**
+1. **Menu in** — the company sends a WhatsApp message, a printed weekly or
+   fifteen-day chart, or nothing at all. The manager pastes the text, scans
+   the photo, or types it, sets the quantity per dish and the expected
+   headcount, and publishes.
+2. **Chef** — sees the day meal by meal in cooking order, each dish carrying
+   what it takes, and raises the raw-material order.
+3. **Manager** — approves. Each line may move by at most ±7%.
+4. **Store keeper** — issues against the approval. Stock moves only here.
+5. **Kitchen returns** — what was drawn but not cooked goes back, and the
+   store keeper accepts it onto the shelf.
+6. **Plates served** — counted after service. This is what the company is
+   billed on, and what every cost-per-head figure divides by.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Rules the database enforces
 
-Changes made via Lovable will be committed automatically to this repo.
+None of these are screen-level checks; they are triggers and row-level
+policies, so they hold through the API too.
 
-**Use your preferred IDE**
+- Closing stock is calculated from the ledger, never typed. Stock cannot go
+  negative.
+- The store keeper receives goods and issues them; they cannot type a stock
+  figure. A count that disagrees is found by somebody else, through the
+  blind audit.
+- Only the chef raises an order; the manager who approves it cannot also
+  raise it.
+- Once a record is in, only an admin or super admin may change it.
+- A menu cannot be planned for a day already past. The plate count is
+  entered once; only an admin may correct it, and every correction is logged.
+- Contracted per-plate rates are admin-only, and are not readable by vendors
+  or without signing in.
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+## Development
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+npm install
+npm run dev          # local
+npm run typecheck    # tsc against tsconfig.app.json — `npx tsc` checks nothing here
+npm run build
+npx vercel deploy --prod --yes
 ```
 
-**Edit a file directly in GitHub**
+Database migrations live in `supabase/migrations` and are applied with
+`npx supabase db query --linked -f <file>`.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+The Android wrapper is rebuilt only when permissions or the icon change:
 
-**Use GitHub Codespaces**
+```sh
+npx cap sync android
+cd android && ./gradlew assembleRelease
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+`android/app/slp-release.keystore` signs the APK and is deliberately not in
+this repository. Losing it means every phone must uninstall before it can
+take an update.

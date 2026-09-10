@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SLP Canteen Hub</string>
+    <string name="title_activity_main">SLP Canteen Hub</string>
+    <string name="package_name">com.slphospitality.canteenhub</string>
+    <string name="custom_url_scheme">com.slphospitality.canteenhub</string>
+</resources>

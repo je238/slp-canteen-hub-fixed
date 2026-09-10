@@ -1,17 +1,31 @@
 {
   "name": "SLP Canteen Hub",
   "short_name": "Canteen Hub",
-  "description": "Multi-canteen management system",
+  "description": "Inventory and canteen management for SLP Hospitality",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#f97316",
+  "theme_color": "#1e4b6e",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/icon.svg", "sizes": "512x512", "type": "image/svg+xml"
-      "sizes": "64x64",
-      "type": "image/x-icon"
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

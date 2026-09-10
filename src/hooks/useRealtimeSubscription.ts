@@ -6,7 +6,9 @@ type TableName = "orders" | "ingredients" | "purchases" | "expenses";
 
 const tableToQueryKeys: Record<TableName, string[]> = {
   orders: ["orders", "kitchenQueue", "kitchenServed", "qrUnsettled", "trackOrder"],
-  ingredients: ["ingredients"],
+  // A stock-in can make a previously blocked requisition issuable. Refresh
+  // the pending queue at the same moment so it rises to the top immediately.
+  ingredients: ["ingredients", "availability", "requisitions"],
   purchases: ["purchases"],
   expenses: ["expenses"],
 };

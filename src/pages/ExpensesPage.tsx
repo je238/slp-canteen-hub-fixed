@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { fmtDate, todayIst } from "@/lib/date";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
 import { useExpenses, useAddExpense } from "@/hooks/useSupabaseData";
@@ -22,7 +23,7 @@ export default function ExpensesPage() {
   const [category, setCategory] = useState("Utilities");
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState(0);
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(todayIst());
 
   const handleAdd = async () => {
     if (selectedCanteen === "all") { toast.error("Select a canteen first"); return; }
@@ -100,7 +101,7 @@ export default function ExpensesPage() {
                 <tbody>
                   {expenses?.map((e: any) => (
                     <tr key={e.id} className="border-b last:border-0 hover:bg-muted/50">
-                      <td className="py-2">{new Date(e.expense_date).toLocaleDateString()}</td>
+                      <td className="py-2">{fmtDate(e.expense_date)}</td>
                       <td className="py-2">{e.category}</td>
                       <td className="py-2 text-muted-foreground">{e.description || "—"}</td>
                       <td className="py-2 text-right font-medium">₹{Number(e.amount).toLocaleString()}</td>
