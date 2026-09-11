@@ -4,7 +4,7 @@ import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   useRequisitions, useCreateRequisition, useReviewRequisition, useIssueRequisitionActual,
-  useSendRequisitionBack, useClosePendingRequisitionItem, useCorrectRequisition, useAdminCorrectRequisition, useCancelRequisition,
+  useSendRequisitionBack, useClosePendingRequisitionItem, useAdminCorrectRequisition, useCancelRequisition,
   useMenuPlans, useIngredientRates, useSuggestedRequisition, useAvailability, useDailyOperatingSnapshot,
   useMenuWastageContext, useHistoricalIssueReconciliation, useSubmitIssueReconciliation,
   useReviewIssueReconciliation, useStoreKeeperLeaveMode, useSetStoreKeeperLeaveMode,
@@ -32,11 +32,10 @@ import VoiceReasonInput from "@/components/VoiceReasonInput";
 
 // The approval chain on one screen, shown according to who is looking:
 //   Chef        → raise a requisition against a published menu
-//   Unit Mgr    → review it; each line may be moved by at most ±7%
+//   Unit Mgr    → choose the final item and quantity, then approve it
 //   Store Keeper→ issue the approved requisition (stock moves here)
-// The ±7% band is enforced by a DB trigger, not just by this UI.
-
-const TOLERANCE = 0.07;
+// Once approved, the order is locked for managers. Admin correction remains
+// a separate, audited emergency path.
 const money = (v: any) => `₹${Math.round(Number(v) || 0).toLocaleString("en-IN")}`;
 
 function todayIso() {
@@ -54,8 +53,8 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function RequisitionsPage() {
   const { selectedCanteen } = useAppContext();
-  const { isManagerOrAbove, isChef, canIssueStock, roleData } = useAuth();
-  const canFullEdit = isManagerOrAbove;
+  const { isManagerOrAbove, isChef, canIssueStock, roleData, rank } = useAuth();
+  const canAdminCorrect = rank >= 60;
   const isStoreKeeper = String(roleData.role).toLowerCase() === "store_keeper";
   const [kitchenDate, setKitchenDate] = useState(todayIst());
   const { data: reqs, isLoading } = useRequisitions(selectedCanteen);
@@ -81,7 +80,6 @@ export default function RequisitionsPage() {
   const issueLeavePickup = useIssueLeavePickup();
   const sendBack = useSendRequisitionBack();
   const closePending = useClosePendingRequisitionItem();
-  const correctReq = useCorrectRequisition();
   const adminCorrectReq = useAdminCorrectRequisition();
   const cancelReq = useCancelRequisition();
   const { data: activeStoreLeave } = useStoreKeeperLeaveMode(selectedCanteen);
@@ -161,6 +159,7 @@ export default function RequisitionsPage() {
   // ----- review -----
   const [review, setReview] = useState<any>(null);
   const [approved, setApproved] = useState<Record<string, string>>({});
+  const [reviewIngredient, setReviewIngredient] = useState<Record<string, string>>({});
   const [reviewNotes, setReviewNotes] = useState("");
   const [pickupName, setPickupName] = useState("");
   const [correction, setCorrection] = useState<any>(null);
@@ -349,10 +348,11 @@ export default function RequisitionsPage() {
   // The lines the store will not be able to issue, worked out from what the
   // manager is about to approve rather than from what was asked.
   const shortInReview = (review?.requisition_items || []).map((l: any) => {
-    const have = Number(l.ingredients?.current_stock ?? 0);
+    const ingredient = (ingredients || []).find((x: any) => x.id === (reviewIngredient[l.id] || l.ingredient_id));
+    const have = Number(ingredient?.current_stock ?? 0);
     const typed = Number(approved[l.id]);
     const take = isNaN(typed) ? Number(l.requested_qty) : typed;
-    return { name: l.ingredients?.name, have, take, unit: l.unit };
+    return { name: ingredient?.name || l.ingredients?.name, have, take, unit: ingredient?.unit || l.unit };
   }).filter((x: any) => x.take > 0 && x.take > x.have);
 
   const openReview = (r: any) => {
@@ -360,30 +360,42 @@ export default function RequisitionsPage() {
     setReviewNotes(r.review_notes || "");
     setPickupName(r.pickup_person_name || "");
     const init: Record<string, string> = {};
+    const initIngredients: Record<string, string> = {};
     for (const l of r.requisition_items || []) {
       init[l.id] = String(l.approved_qty ?? l.requested_qty);
+      initIngredients[l.id] = l.ingredient_id;
     }
     setApproved(init);
+    setReviewIngredient(initIngredients);
   };
-
-  const outOfBand = useMemo(() => {
-    if (!review) return [];
-    return (review.requisition_items || []).filter((l: any) => {
-      const v = Number(approved[l.id]);
-      if (isNaN(v) || v === 0) return false;
-      const req = Number(l.requested_qty);
-      return v < req * (1 - TOLERANCE) - 1e-9 || v > req * (1 + TOLERANCE) + 1e-9;
-    });
-  }, [review, approved]);
 
   const submitReview = async (approve: boolean) => {
     if (!review) return;
-    if (approve && outOfBand.length > 0) {
-      toast.error(`${outOfBand.length} line(s) are outside ±7% — adjust them or send the requisition back`);
-      return;
-    }
     if (approve && storeLeaveMode && pickupName.trim().length < 2) {
       toast.error("Store Keeper chhutti par hai — saman lene wale ka naam likhein");
+      return;
+    }
+    const lines = (review.requisition_items || []).map((l: any) => ({
+      id: l.id,
+      ingredient_id: reviewIngredient[l.id] || l.ingredient_id,
+      approved_qty: Number(approved[l.id]),
+    }));
+    if (approve && lines.some((line: any) => !Number.isFinite(line.approved_qty) || line.approved_qty < 0)) {
+      toast.error("Har quantity 0 ya usse zyada honi chahiye");
+      return;
+    }
+    const activeIngredientIds = lines.filter((line: any) => line.approved_qty > 0).map((line: any) => line.ingredient_id);
+    if (approve && new Set(activeIngredientIds).size !== activeIngredientIds.length) {
+      toast.error("Ek hi item order mein do active lines par select nahi ho sakta");
+      return;
+    }
+    const changed = approve && lines.some((line: any) => {
+      const original = (review.requisition_items || []).find((x: any) => x.id === line.id);
+      return line.ingredient_id !== original?.ingredient_id
+        || Math.abs(line.approved_qty - Number(original?.requested_qty || 0)) > 1e-9;
+    });
+    if (changed && !reviewNotes.trim()) {
+      toast.error("Order change kiya hai, isliye reason likhna zaroori hai");
       return;
     }
     try {
@@ -394,17 +406,16 @@ export default function RequisitionsPage() {
         id: review.id,
         approve,
         review_notes: reviewNotes,
-        lines: (review.requisition_items || []).map((l: any) => ({
-          id: l.id,
-          approved_qty: approve ? (Number(approved[l.id]) || 0) : 0,
-        })),
+        lines: approve ? lines : [],
       });
       toast.success(approve
-        ? (storeLeaveMode ? `Approved — ${pickupName.trim()} ko self-pickup assign hua` : "Approved — the store keeper can issue it now")
+        ? (lines.every((line: any) => line.approved_qty === 0)
+          ? "Pura order cancel ho gaya"
+          : storeLeaveMode ? `Approved — ${pickupName.trim()} ko self-pickup assign hua` : "Approved — the store keeper can issue it now")
         : "Sent back / rejected");
       setReview(null);
     } catch (e: any) {
-      toast.error(e.message);   // includes the DB's ±7% rejection
+      toast.error(e.message);
     }
   };
 
@@ -558,16 +569,12 @@ export default function RequisitionsPage() {
     const invalid = lines.find((line: any) => {
       const original = (correction.requisition_items || []).find((x: any) => x.id === line.id);
       const issued = Number(original?.issued_qty || 0);
-      const current = Number(original?.approved_qty ?? original?.requested_qty ?? 0);
       const changedItem = line.ingredient_id !== original?.ingredient_id;
       return !Number.isFinite(line.approved_qty) || line.approved_qty < issued - 1e-9
-        || (!canFullEdit && line.approved_qty > current + 1e-9)
         || (changedItem && issued > 0);
     });
     if (invalid) {
-      toast.error(canFullEdit
-        ? "Issued quantity se kam nahi kar sakte; issued item ka name bhi change nahi hoga"
-        : "Quantity current approval se zyada ya issued quantity se kam nahi ho sakti");
+      toast.error("Issued quantity se kam nahi kar sakte; issued item ka name bhi change nahi hoga");
       return;
     }
     const activeIngredientIds = lines
@@ -581,16 +588,10 @@ export default function RequisitionsPage() {
       return;
     }
     try {
-      const res = canFullEdit
-        ? await adminCorrectReq.mutateAsync({ id: correction.id, lines, reason: correctionReason.trim() })
-        : await correctReq.mutateAsync({
-            id: correction.id,
-            lines: lines.map(({ id, approved_qty }: any) => ({ id, approved_qty })),
-            reason: correctionReason.trim(),
-          });
+      const res = await adminCorrectReq.mutateAsync({ id: correction.id, lines, reason: correctionReason.trim() });
       toast.success(res?.status === "cancelled"
         ? "Pura order cancel ho gaya"
-        : canFullEdit ? "Order ka item/quantity update ho gaya" : "Order ki quantity update ho gayi");
+        : "Admin correction save ho gayi");
       setCorrection(null);
     } catch (e: any) { toast.error(e.message); }
   };
@@ -607,6 +608,7 @@ export default function RequisitionsPage() {
       await cancelReq.mutateAsync({ id: r.id, reason: why.trim() });
       toast.success(`REQ-${r.req_no} cancel ho gaya`);
       if (correction?.id === r.id) setCorrection(null);
+      if (review?.id === r.id) setReview(null);
     } catch (e: any) { toast.error(e.message); }
   };
 
@@ -974,7 +976,7 @@ export default function RequisitionsPage() {
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Chef raises the request → Unit Manager may adjust each line by at most <b>±7%</b> and approves → Store Keeper issues it, and only then does stock move.
+                Chef order bhejta hai → Manager approval se pehle final item aur quantity set karta hai → Store Keeper approved order issue karta hai, tab stock move hota hai.
               </p>
             )}
           </CardContent>
@@ -1129,7 +1131,7 @@ export default function RequisitionsPage() {
                               onClick={() => cancelWholeOrder(r)} disabled={cancelReq.isPending}>
                         <Trash2 className="mr-1.5 h-4 w-4" /> Order cancel
                       </Button>
-                      <Button size="sm" onClick={() => openReview(r)}>Review</Button>
+                      <Button size="sm" onClick={() => openReview(r)}>Review &amp; full edit</Button>
                     </div>
                   ) : null)}
             </TabsContent>
@@ -1166,11 +1168,13 @@ export default function RequisitionsPage() {
               )}
               {renderDateGroupedRequisitions(approvedList, "approved", "Nothing approved and waiting.", (r: any) =>
                   <div className="flex gap-2 flex-wrap justify-end">
+                     {canAdminCorrect && (
+                         <Button size="sm" variant="outline" onClick={() => openCorrection(r)}>
+                           <Pencil className="w-4 h-4 mr-1.5" /> Admin correction
+                         </Button>
+                     )}
                      {isManagerOrAbove && (
                        <>
-                         <Button size="sm" variant="outline" onClick={() => openCorrection(r)}>
-                           <Pencil className="w-4 h-4 mr-1.5" /> Full order edit
-                         </Button>
                          {!hasIssuedAnything(r) && (
                            <Button size="sm" variant="ghost" onClick={() => doSendBack(r.id)}
                                    disabled={sendBack.isPending}>
@@ -1360,19 +1364,15 @@ export default function RequisitionsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Chef's original request is never rewritten. Managers may reduce only;
-          admins may replace an unissued item and set the full final quantity. */}
+      {/* Approved orders are locked for managers. Admins retain a separate,
+          audited emergency correction path. */}
       <Dialog open={!!correction} onOpenChange={(open) => { if (!open) setCorrection(null); }}>
         <DialogContent className="h-[calc(100dvh-0.75rem)] max-h-[calc(100dvh-0.75rem)] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] overflow-y-auto p-4 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:p-6">
           <DialogHeader>
-            <DialogTitle>REQ-{correction?.req_no} · Manager full order edit</DialogTitle>
+            <DialogTitle>REQ-{correction?.req_no} · Admin correction after approval</DialogTitle>
           </DialogHeader>
           <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-            {canFullEdit ? (
-              <>Quantity badha ya ghata sakte hain. Item name bhi badal sakte hain, jab us line ka saman issue na hua ho. <b>0</b> karne par item cancel hoga.</>
-            ) : (
-              <>Quantity sirf kam ho sakti hai. <b>0</b> karne par woh item cancel hoga.</>
-            )}
+            Sirf Admin emergency correction kar sakta hai. Quantity badha/ghata sakte hain aur unissued line ka item badal sakte hain. <b>0</b> karne par item cancel hoga.
             {" "}Jo quantity Store Keeper de chuka hai, usse kam nahi kar sakte—woh Chef “Bacha saman wapas” se return karega.
           </div>
 
@@ -1396,8 +1396,7 @@ export default function RequisitionsPage() {
                       {line.original_ingredient?.name && (
                         <p className="text-xs text-warning">Chef ka original item: {line.original_ingredient.name}</p>
                       )}
-                      {canFullEdit && (
-                        <div className="pt-1">
+                      <div className="pt-1">
                           <Label className="text-xs">Item name</Label>
                           <Select value={selectedIngredientId}
                                   disabled={issued > 0}
@@ -1413,13 +1412,12 @@ export default function RequisitionsPage() {
                               ))}
                             </SelectContent>
                           </Select>
-                        </div>
-                      )}
+                      </div>
                     </div>
                     <div className="shrink-0 text-right">
                       <Label className="text-xs">Ab kitna rakhna hai?</Label>
                       <div className="mt-1 flex items-center gap-2">
-                        <Input type="number" min={issued} max={canFullEdit ? undefined : finalNow} step="any"
+                        <Input type="number" min={issued} step="any"
                                className="h-11 w-28 text-right text-base"
                                value={correctedQty[line.id] ?? ""}
                                onChange={(e) => setCorrectedQty((prev) => ({ ...prev, [line.id]: e.target.value }))} />
@@ -1460,8 +1458,8 @@ export default function RequisitionsPage() {
             <div className="flex gap-2">
               <Button variant="outline" className="h-11" onClick={() => setCorrection(null)}>Band karo</Button>
               <Button className="h-11" onClick={saveCorrection}
-                      disabled={correctReq.isPending || adminCorrectReq.isPending || !correctionReason.trim()}>
-                {correctReq.isPending || adminCorrectReq.isPending ? "Save ho raha hai…" : "Changes save karo"}
+                      disabled={adminCorrectReq.isPending || !correctionReason.trim()}>
+                {adminCorrectReq.isPending ? "Save ho raha hai…" : "Correction save karo"}
               </Button>
             </div>
           </DialogFooter>
@@ -1820,68 +1818,62 @@ export default function RequisitionsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ---- Manager review with the ±7% band ---- */}
+      {/* ---- Manager full edit before approval ---- */}
       <Dialog open={!!review} onOpenChange={(o) => { if (!o) setReview(null); }}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Review REQ-{review?.req_no}</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground">
-            You may change any quantity by up to <b>±7%</b>. Set a line to 0 to reject just that item.
-            Anything further has to go back to the chef — the database refuses it.
+            Approval se pehle Manager final item aur quantity decide karega. Quantity koi bhi rakh sakte hain;
+            <b> 0</b> karne par woh line cancel hogi. Chef ka original order history mein safe rahega.
           </p>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="text-xs">Item</TableHead>
-                <TableHead className="text-xs text-right">Requested</TableHead>
-                <TableHead className="text-xs text-right">Allowed band</TableHead>
-                <TableHead className="text-xs text-right">Approve</TableHead>
+                <TableHead className="text-xs">Chef request</TableHead>
+                <TableHead className="text-xs text-right">Qty</TableHead>
+                <TableHead className="text-xs">Manager final item</TableHead>
+                <TableHead className="text-xs text-right">Final qty</TableHead>
                 <TableHead className="text-xs text-right">Stock</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(review?.requisition_items || []).map((l: any) => {
                 const req = Number(l.requested_qty);
-                const lo = +(req * (1 - TOLERANCE)).toFixed(3);
-                const hi = +(req * (1 + TOLERANCE)).toFixed(3);
                 const v = Number(approved[l.id]);
-                const bad = !isNaN(v) && v !== 0 && (v < lo - 1e-9 || v > hi + 1e-9);
+                const selectedIngredientId = reviewIngredient[l.id] || l.ingredient_id;
+                const selectedIngredient = (ingredients || []).find((x: any) => x.id === selectedIngredientId);
+                const finalUnit = selectedIngredient?.unit || l.unit;
+                const have = Number(selectedIngredient?.current_stock ?? 0);
+                const take = isNaN(v) ? req : v;
+                const left = Math.round((have - take) * 1000) / 1000;
                 return (
-                  <TableRow key={l.id} className={bad ? "bg-destructive/5" : ""}>
+                  <TableRow key={l.id} className={take === 0 ? "bg-muted/40" : ""}>
                     <TableCell className="text-sm">{l.ingredients?.name}</TableCell>
                     <TableCell className="text-sm text-right">{req} {l.unit}</TableCell>
-                    <TableCell className="text-xs text-right text-muted-foreground">{lo} – {hi}</TableCell>
+                    <TableCell className="min-w-52">
+                      <Select value={selectedIngredientId}
+                        onValueChange={(value) => setReviewIngredient((prev) => ({ ...prev, [l.id]: value }))}>
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Item chuno" /></SelectTrigger>
+                        <SelectContent>
+                          {(ingredients || []).map((item: any) => (
+                            <SelectItem key={item.id} value={item.id}>{item.name} · {item.unit}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
                     <TableCell className="text-right">
                       <Input
-                        type="number" className={`w-24 h-8 text-right ml-auto ${bad ? "border-destructive" : ""}`}
+                        type="number" min="0" step="any" className="w-24 h-9 text-right ml-auto"
                         value={approved[l.id] ?? ""}
                         onChange={(e) => setApproved((p) => ({ ...p, [l.id]: e.target.value }))}
                       />
+                      <span className="text-[10px] text-muted-foreground">{finalUnit}</span>
                     </TableCell>
                     <TableCell className="text-sm text-right">
-                      {(() => {
-                        // What the manager is actually deciding: whether the
-                        // store can hand this over. Thirty-eight lines on a
-                        // phone and a bare number in the last column is not a
-                        // warning — eleven lines were approved against an
-                        // empty shelf because nothing on the screen said so.
-                        const have = Number(l.ingredients?.current_stock ?? 0);
-                        const take = isNaN(v) ? Number(l.requested_qty) : v;
-                        const left = Math.round((have - take) * 1000) / 1000;
-                        return (
-                          <>
-                            <span className="text-muted-foreground">{have} {l.unit}</span>
-                            {take > 0 && (
-                              left < 0
-                                ? <span className="block text-[11px] font-semibold text-destructive">
-                                    {Math.abs(left)} {l.unit} short
-                                  </span>
-                                : <span className="block text-[11px] text-muted-foreground">
-                                    {left} left after
-                                  </span>
-                            )}
-                          </>
-                        );
-                      })()}
+                      <span className="text-muted-foreground">{have} {finalUnit}</span>
+                      {take > 0 && (left < 0
+                        ? <span className="block text-[11px] font-semibold text-destructive">{Math.abs(left)} {finalUnit} short</span>
+                        : <span className="block text-[11px] text-muted-foreground">{left} left after</span>)}
                     </TableCell>
                   </TableRow>
                 );
@@ -1920,14 +1912,15 @@ export default function RequisitionsPage() {
             </div>
           )}
 
-          <Input placeholder="Review note (optional)" value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} />
+          <VoiceReasonInput value={reviewNotes} onChange={setReviewNotes}
+            label="Review note" placeholder="Order change kiya ho to reason zaroor likhein" />
           <DialogFooter className="items-center sm:justify-between gap-3">
-            <p className={`text-xs ${outOfBand.length ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
-              {outOfBand.length ? `${outOfBand.length} line(s) outside ±7%` : "All lines within ±7%"}
-            </p>
+            <Button variant="destructive" onClick={() => review && cancelWholeOrder(review)} disabled={cancelReq.isPending}>
+              <Trash2 className="mr-1.5 h-4 w-4" /> Pura order cancel
+            </Button>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => submitReview(false)} disabled={reviewReq.isPending || assignLeavePickup.isPending}>Reject</Button>
-              <Button onClick={() => submitReview(true)} disabled={reviewReq.isPending || assignLeavePickup.isPending || outOfBand.length > 0 || (storeLeaveMode && pickupName.trim().length < 2)}>
+              <Button onClick={() => submitReview(true)} disabled={reviewReq.isPending || assignLeavePickup.isPending || (storeLeaveMode && pickupName.trim().length < 2)}>
                 <ClipboardList className="w-4 h-4 mr-1.5" /> Approve
               </Button>
             </div>

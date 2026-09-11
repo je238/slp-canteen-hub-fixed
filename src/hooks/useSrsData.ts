@@ -281,40 +281,25 @@ export function useCreateRequisition() {
   });
 }
 
-// Manager review. The ±7% band is enforced by a database trigger, so a bad
-// quantity comes back as an error here rather than being silently accepted.
+// Manager review is one atomic database action: final item/quantity changes
+// and the approval status either all save together or none of them do.
 export function useReviewRequisition() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, lines, approve, review_notes }: {
       id: string;
-      lines: { id: string; approved_qty: number }[];
+      lines: { id: string; ingredient_id: string; approved_qty: number }[];
       approve: boolean;
       review_notes?: string;
     }) => {
-      for (const l of lines) {
-        const { data, error } = await supabase
-          .from("requisition_items" as any)
-          .update({ approved_qty: l.approved_qty })
-          .eq("id", l.id)
-          .select("id");
-        if (error) throw error;
-        // An update the security rules filter out returns success with no
-        // rows. Approving nothing while the screen says "approved" is how a
-        // requisition gets issued on quantities nobody agreed to.
-        if (!data || data.length === 0) throw new Error("You are not allowed to approve this order");
-      }
-      const { data: head, error: hErr } = await supabase
-        .from("requisitions" as any)
-        .update({
-          status: approve ? "approved" : "rejected",
-          reviewed_at: new Date().toISOString(),
-          review_notes: review_notes || null,
-        })
-        .eq("id", id)
-        .select("id");
-      if (hErr) throw hErr;
-      if (!head || head.length === 0) throw new Error("You are not allowed to review this order");
+      const { data, error } = await supabase.rpc("manager_review_requisition" as any, {
+        p_req_id: id,
+        p_lines: lines,
+        p_approve: approve,
+        p_review_notes: review_notes?.trim() || null,
+      });
+      if (error) throw error;
+      return data as any;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["requisitions"] }); qc.invalidateQueries({ queryKey: ["availability"] }); },
   });
