@@ -755,12 +755,15 @@ export default function RequisitionsPage() {
               const asked = Number(l.requested_qty || 0);
               const got = Number(l.issued_qty || 0);
               const left = pendingQty(l);
-              const cancelled = Number(l.cancelled_qty || 0);
-              const unit = l.unit || l.ingredients?.unit || "";
+              // Chef sees the request they submitted, not the Manager's
+              // commercial decision. A replaced item and its final quantity
+              // remain visible only to Manager/Admin/Store Keeper.
+              const chefItem = l.original_ingredient || l.ingredients;
+              const unit = chefItem?.unit || l.unit || "";
               return (
                 <div key={l.id} className={`rounded-lg border p-3 ${r.status === "issued" ? "bg-success/5 border-success/20" : "bg-muted/20"}`}>
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-semibold text-base">{l.ingredients?.name || "—"}</p>
+                    <p className="font-semibold text-base">{chefItem?.name || "—"}</p>
                     {r.status === "issued"
                       ? <Badge variant="outline" className="text-success border-success/30"><CheckCircle2 className="w-3 h-3 mr-1" /> Complete</Badge>
                       : <Badge variant="outline">Store processing</Badge>}
@@ -768,9 +771,6 @@ export default function RequisitionsPage() {
                   <div className="grid grid-cols-1 gap-2 mt-2 text-center">
                     <div className="rounded bg-background p-2"><p className="text-[10px] text-muted-foreground">CHEF ORDER</p><p className="font-bold">{asked} {unit}</p></div>
                   </div>
-                  {cancelled > 0 && (
-                    <p className="text-xs text-muted-foreground mt-2">{cancelled} {unit} “ab nahi chahiye” karke band kiya{l.cancellation_reason ? ` — ${l.cancellation_reason}` : ""}</p>
-                  )}
                   {r.status === "approved" && got > 0 && left > 0 && (
                     <Button variant="outline" className="w-full mt-2 h-11 text-sm" disabled={closePending.isPending} onClick={() => closeUnneeded(l)}>
                       <CheckCircle2 className="w-4 h-4 mr-2" /> Kaam ho gaya — baaki band karo
