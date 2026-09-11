@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { AlertTriangle, CalendarDays, Camera, CheckCircle2, ChevronDown, ClipboardList, PackageCheck, Pencil, Plus, Search, Send, Sparkles, Trash2, Undo2, UserCheck, Users, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { fmtDate, fmtDateTime, fmtDayDate, shiftIst, todayIst, tomorrowIst, yesterdayIst } from "@/lib/date";
+import { requisitionMenuDishes } from "@/lib/requisitionMenu";
 import KitchenPlan from "@/components/KitchenPlan";
 import { ReturnButton, PendingReturns } from "@/components/KitchenReturns";
 import VoiceReasonInput from "@/components/VoiceReasonInput";
@@ -709,6 +710,17 @@ export default function RequisitionsPage() {
                 <span className="text-muted-foreground">(from the manager's menu)</span>
               </p>
             )}
+            {r.menu_plan_id && (() => {
+              const dishes = requisitionMenuDishes(r.menu_plans);
+              return (
+                <div className="mt-2 rounded-md border border-accent/20 bg-accent/5 px-3 py-2 text-xs">
+                  <span className="font-semibold text-foreground">Menu dishes: </span>
+                  <span className={dishes.length ? "text-foreground" : "text-muted-foreground"}>
+                    {dishes.length ? dishes.join(" + ") : "Menu mein dishes record nahi hain"}
+                  </span>
+                </div>
+              );
+            })()}
             {r.notes && <p className="text-xs mt-1">{r.notes}</p>}
             {r.pickup_person_name && (
               <p className="mt-1 flex items-center gap-1 text-xs font-medium text-accent">
