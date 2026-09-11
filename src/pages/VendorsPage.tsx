@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
-import { useAuth, rankOf } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useSuppliers, usePurchases, useAddSupplier, useUpdateSupplier, useVendorPurchases } from "@/hooks/useSupabaseData";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -172,7 +172,9 @@ function VendorDetailDialog({ vendor, onClose, onEdit, canEdit }: { vendor: any;
 export default function VendorsPage() {
   const { selectedCanteen } = useAppContext();
   const { roleData } = useAuth();
-  const canEditExisting = rankOf(roleData?.role) >= rankOf("unit_manager");
+  const role = String(roleData?.role ?? "").toLowerCase();
+  const canAddVendor = role === "store_keeper" || ["admin", "super_admin", "owner"].includes(role);
+  const canEditExisting = ["admin", "super_admin", "owner"].includes(role);
   const { data: vendors, isLoading } = useSuppliers(selectedCanteen);
   const { data: purchases } = usePurchases(selectedCanteen);
   const [search, setSearch] = useState("");
@@ -209,9 +211,9 @@ export default function VendorsPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input placeholder="Search vendors…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-10" />
           </div>
-          <Button className="h-10 gap-1.5" onClick={openAdd}>
+          {canAddVendor && <Button className="h-10 gap-1.5" onClick={openAdd}>
             <Plus className="w-4 h-4" /> Add vendor
-          </Button>
+          </Button>}
         </div>
 
         {isLoading ? (
@@ -223,7 +225,7 @@ export default function VendorsPage() {
               <p className="text-sm text-muted-foreground">
                 {search ? "No vendors match your search." : "No vendors yet. Add your suppliers to track purchases, pending bills and price history."}
               </p>
-              {!search && (
+              {!search && canAddVendor && (
                 <Button variant="outline" size="sm" onClick={openAdd} className="gap-1.5">
                   <Plus className="w-3.5 h-3.5" /> Add your first vendor
                 </Button>
@@ -276,7 +278,7 @@ export default function VendorsPage() {
         )}
       </div>
 
-      <VendorFormDialog
+      {canAddVendor && <VendorFormDialog
         key={`${editVendor?.id ?? "new"}-${formOpen}`}
         open={formOpen}
         onOpenChange={setFormOpen}
@@ -289,7 +291,7 @@ export default function VendorsPage() {
           email: editVendor.email || "",
           address: editVendor.address || "",
         } : EMPTY_FORM}
-      />
+      />}
       <VendorDetailDialog
         vendor={detailVendor}
         onClose={() => setDetailVendor(null)}

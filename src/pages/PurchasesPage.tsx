@@ -1,6 +1,7 @@
 import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   usePurchases, useSuppliers, useAddSupplier, useConfirmPurchase, useIngredients,
   useReceiveStockWithoutBill, useAttachPurchaseInvoice, useCorrectPurchaseLine,
@@ -378,6 +379,10 @@ function DeliveryEvidence({ canteenId }: { canteenId: string }) {
 
 export default function PurchasesPage() {
   const { selectedCanteen } = useAppContext();
+  const { roleData } = useAuth();
+  const role = String(roleData?.role ?? "").toLowerCase();
+  const canManagePurchases = role === "store_keeper"
+    || ["admin", "super_admin", "owner"].includes(role);
   const { data: purchases, isLoading } = usePurchases(selectedCanteen);
   const { data: suppliers } = useSuppliers(selectedCanteen);
   const { data: ingredients } = useIngredients(selectedCanteen);
@@ -483,7 +488,7 @@ export default function PurchasesPage() {
   return (
     <AppLayout title="Purchases & Suppliers">
       <div className="min-w-0 space-y-4 overflow-x-hidden animate-fade-in">
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
+        {canManagePurchases && <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
           {selectedCanteen !== "all" && <DeliveryEvidence canteenId={selectedCanteen} />}
           <Dialog open={supplierDialog} onOpenChange={setSupplierDialog}>
             <DialogTrigger asChild>
@@ -544,7 +549,13 @@ export default function PurchasesPage() {
               </div>
             </DialogContent>
           </Dialog>
-        </div>
+        </div>}
+
+        {!canManagePurchases && (
+          <div className="rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+            View only — aap purchases, bills aur item details dekh sakte hain. Receiving aur correction Store Keeper/Admin karega.
+          </div>
+        )}
 
         <Tabs defaultValue="draft">
           <TabsList className="grid w-full grid-cols-2 sm:inline-grid sm:w-auto"><TabsTrigger value="draft">Drafts ({drafts.length})</TabsTrigger><TabsTrigger value="confirmed">Confirmed ({confirmed.length})</TabsTrigger></TabsList>
@@ -571,9 +582,9 @@ export default function PurchasesPage() {
                     </div>
                     <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
                     <InvoiceImageButton path={p.invoice_image_url} />
-                    <Button size="sm" onClick={() => handleConfirm(p.id)} disabled={confirmPurchase.isPending} className="w-full justify-center gap-1 bg-success text-success-foreground hover:bg-success/90 sm:w-auto">
+                    {canManagePurchases && <Button size="sm" onClick={() => handleConfirm(p.id)} disabled={confirmPurchase.isPending} className="w-full justify-center gap-1 bg-success text-success-foreground hover:bg-success/90 sm:w-auto">
                       <Check className="w-3 h-3" /> Confirm & Update Stock
-                    </Button>
+                    </Button>}
                     </div>
                   </div>
                   {expandedPurchase === p.id && <PurchaseLineDetails purchase={p} />}
@@ -633,7 +644,7 @@ export default function PurchasesPage() {
                     </div>
                     <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
                       {billFiles.length === 0 && <InvoiceImageButton path={p.invoice_image_url} />}
-                      {(billPending || billFiles.length < 4) && (
+                      {canManagePurchases && (billPending || billFiles.length < 4) && (
                         <Button size="sm" variant={billPending ? "default" : "outline"} className="w-full justify-center gap-1 text-xs sm:w-auto" onClick={() => setBillPurchase(p)}>
                           <Paperclip className="h-3.5 w-3.5" /> {billPending ? "Bill aaya — upload" : "Aur bill lagao"}
                         </Button>
@@ -642,7 +653,10 @@ export default function PurchasesPage() {
                   </div>
                   {expandedPurchase === p.id && (
                     <div>
-                      <PurchaseLineDetails purchase={p} onCorrect={(line) => setCorrectionTarget({ purchase: p, line })} />
+                      <PurchaseLineDetails
+                        purchase={p}
+                        onCorrect={canManagePurchases ? (line) => setCorrectionTarget({ purchase: p, line }) : undefined}
+                      />
                       {billFiles.length > 0 && (
                         <div className="mt-3 border-t pt-3 space-y-1">
                           <p className="text-xs font-semibold">Attached bills ({billFiles.length}/4)</p>
@@ -667,13 +681,15 @@ export default function PurchasesPage() {
           </TabsContent>
         </Tabs>
       </div>
-      <LateBillsDialog purchase={billPurchase} onClose={() => setBillPurchase(null)} />
-      <PurchaseCorrectionDialog
-        purchase={correctionTarget?.purchase || null}
-        line={correctionTarget?.line || null}
-        ingredients={(ingredients || []) as any[]}
-        onClose={() => setCorrectionTarget(null)}
-      />
+      {canManagePurchases && <LateBillsDialog purchase={billPurchase} onClose={() => setBillPurchase(null)} />}
+      {canManagePurchases && (
+        <PurchaseCorrectionDialog
+          purchase={correctionTarget?.purchase || null}
+          line={correctionTarget?.line || null}
+          ingredients={(ingredients || []) as any[]}
+          onClose={() => setCorrectionTarget(null)}
+        />
+      )}
     </AppLayout>
   );
 }

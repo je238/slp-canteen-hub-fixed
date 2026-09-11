@@ -76,14 +76,14 @@ export const NAV: NavEntry[] = [
   // Store. Scanning bills is the store keeper's job.
   { path: "/invoice-scan", label: "Invoice Scan", icon: ScanLine,
     roles: STORE_AND_ADMIN, hideFrom: OWNER_AND_ADMIN },
-  { path: "/inventory", label: "Inventory", icon: Package, roles: ["store_keeper","ops_manager",...ADMIN_UP] },
+  { path: "/inventory", label: "Inventory", icon: Package, roles: ["store_keeper", ...MANAGER_UP] },
   { path: "/central-kitchen", label: "Central Kitchen", icon: ArrowLeftRight,
     roles: ["store_keeper", ...MANAGER_UP] },
-  { path: "/purchases", label: "Purchases", icon: Truck, roles: STORE_AND_ADMIN },
+  { path: "/purchases", label: "Purchases", icon: Truck, roles: ["store_keeper", ...MANAGER_UP] },
   { path: "/vendor-bills", label: "Vendor Bills", icon: FileUp, roles: STORE_AND_ADMIN },
 
   // Masters and money.
-  { path: "/vendors", label: "Vendor Master", icon: Store, roles: STORE_AND_ADMIN },
+  { path: "/vendors", label: "Vendor Master", icon: Store, roles: ["store_keeper", ...MANAGER_UP] },
   { path: "/expenses", label: "Expenses", icon: Wallet, roles: ["ops_manager", ...ADMIN_UP], hideFrom: OPS_ONLY },
   { path: "/budgets", label: "Budgets", icon: Target, roles: ["ops_manager", ...ADMIN_UP], hideFrom: OPS_ONLY },
   { path: "/reports-center", label: "Reports", icon: BarChart3, roles: MANAGER_UP },

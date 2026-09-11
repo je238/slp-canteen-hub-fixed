@@ -4,7 +4,7 @@ import { useHistoricalUnitReview } from "@/hooks/useSrsData";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
-export default function HistoricalUnitReview({ canteenId }: { canteenId: string }) {
+export default function HistoricalUnitReview({ canteenId, showAction = true }: { canteenId: string; showAction?: boolean }) {
   const { data: rows } = useHistoricalUnitReview(canteenId);
   const navigate = useNavigate();
   if (!rows?.length) return null;
@@ -20,9 +20,9 @@ export default function HistoricalUnitReview({ canteenId }: { canteenId: string 
               Bill और master unit अलग हैं. Paper bill/box label देखकर verify करें; stock अंदाज़े से नहीं बढ़ेगा. सही shelf quantity “Stock Verification” में physical count से जाएगी.
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={() => navigate("/stock-audit")}>
+          {showAction && <Button size="sm" variant="outline" onClick={() => navigate("/stock-audit")}>
             <ClipboardCheck className="w-4 h-4 mr-1.5" /> Physical count
-          </Button>
+          </Button>}
         </div>
         <details>
           <summary className="text-xs font-medium cursor-pointer">Show old unit mismatches</summary>

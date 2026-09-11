@@ -36,6 +36,7 @@ export default function InventoryPage() {
   // the separate receipt, issue, return and delivery-schedule workflows.
   const canAdjustStock = isAdmin;
   const canEditDetails = isAdmin;
+  const canAddIngredient = isAdmin || isStoreKeeper;
   const { data: ingredients, isLoading } = useIngredients(selectedCanteen);
   // What a kilo off this shelf is actually worth — the money tied up in the
   // lots on hand, divided by what is on hand. The same figure the chef is
@@ -214,13 +215,13 @@ export default function InventoryPage() {
             {selectedCanteen === "all" ? (
               <Card className="border-none shadow-sm"><CardContent className="p-8 text-center text-sm text-muted-foreground">Select a canteen to see its daily register.</CardContent></Card>
             ) : (
-              <DailyRegister canteenId={selectedCanteen} />
+              <DailyRegister canteenId={selectedCanteen} readOnly={!canAddIngredient} />
             )}
           </TabsContent>
 
           <TabsContent value="items" className="mt-3 space-y-3">
-        {selectedCanteen !== "all" && <DeliverySchedule canteenId={selectedCanteen} />}
-        {selectedCanteen !== "all" && <HistoricalUnitReview canteenId={selectedCanteen} />}
+        {selectedCanteen !== "all" && <DeliverySchedule canteenId={selectedCanteen} readOnly={!canAddIngredient} />}
+        {selectedCanteen !== "all" && <HistoricalUnitReview canteenId={selectedCanteen} showAction={canAddIngredient} />}
         {selectedCanteen !== "all" && <DuplicateItems canteenId={selectedCanteen} />}
 
         {/* Said out loud. A permission the person holding it does not know is
@@ -247,7 +248,7 @@ export default function InventoryPage() {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                 <Input placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs" />
               </div>
-              <Dialog open={addDialog} onOpenChange={setAddDialog}>
+              {canAddIngredient && <Dialog open={addDialog} onOpenChange={setAddDialog}>
                 <DialogTrigger asChild>
                   <Button size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90 gap-1 text-xs"><Plus className="w-3 h-3" /> Add</Button>
                 </DialogTrigger>
@@ -276,7 +277,7 @@ export default function InventoryPage() {
                     <Button onClick={handleAdd} disabled={addIngredient.isPending} className="w-full bg-accent text-accent-foreground hover:bg-accent/90">Add Ingredient</Button>
                   </div>
                 </DialogContent>
-              </Dialog>
+              </Dialog>}
             </div>
           </CardHeader>
           <CardContent>

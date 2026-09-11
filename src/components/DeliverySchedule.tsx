@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 const cycleLabel = (days: number) => days === 1 ? "Daily" : days === 2 ? "Every 2 days" : days === 7 ? "Weekly" : `Every ${days} days`;
 
-export default function DeliverySchedule({ canteenId }: { canteenId: string }) {
+export default function DeliverySchedule({ canteenId, readOnly = false }: { canteenId: string; readOnly?: boolean }) {
   const { data: rows } = useAvailability(canteenId);
   const save = useSetDeliverySchedule();
   const [search, setSearch] = useState("");
@@ -71,9 +71,9 @@ export default function DeliverySchedule({ canteenId }: { canteenId: string }) {
                   </SelectContent>
                 </Select>
                 <Input type="date" className="h-8 text-xs" value={v.date} onChange={(e) => update(r.ingredient_id, v, { date: e.target.value })} />
-                <Button size="icon" variant="outline" className="h-8 w-8" disabled={save.isPending || !draft[r.ingredient_id]} onClick={() => doSave(r)} title="Save delivery date">
+                {!readOnly && <Button size="icon" variant="outline" className="h-8 w-8" disabled={save.isPending || !draft[r.ingredient_id]} onClick={() => doSave(r)} title="Save delivery date">
                   <Save className="w-3.5 h-3.5" />
-                </Button>
+                </Button>}
               </div>
             );
           })}

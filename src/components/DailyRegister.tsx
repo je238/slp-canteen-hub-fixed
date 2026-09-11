@@ -23,7 +23,7 @@ const BASELINE_DAYS = 14;
 
 const shiftDate = shiftIst;
 
-export default function DailyRegister({ canteenId }: { canteenId: string }) {
+export default function DailyRegister({ canteenId, readOnly = false }: { canteenId: string; readOnly?: boolean }) {
   const [date, setDate] = useState(todayIst());
   const { data: ingredients } = useIngredients(canteenId);
   // Ledger from 14 days back: the extra window builds each item's normal
@@ -172,7 +172,7 @@ export default function DailyRegister({ canteenId }: { canteenId: string }) {
             </Button>
             {/* Issuing stock is the store keeper's duty — the chef may read
                 the register but never take material out of it. */}
-            {canIssueStock && (
+            {canIssueStock && !readOnly && (
               <Button size="sm" onClick={() => setUsageOpen(true)} disabled={date !== todayIst()}>
                 <PackageMinus className="w-4 h-4 mr-1.5" /> Enter Daily Usage
               </Button>
