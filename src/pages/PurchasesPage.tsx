@@ -122,8 +122,14 @@ function PurchaseCorrectionDialog({ purchase, line, ingredients, onClose }: {
     if (!Number.isFinite(qty) || qty <= 0) { toast.error("Correct quantity bharo"); return; }
     if (!Number.isFinite(itemRate) || itemRate < 0) { toast.error("Correct rate bharo"); return; }
     if (!reason.trim()) { toast.error("Galti ka reason likhna zaroori hai"); return; }
+    const oldQuantity = Number(line.stock_quantity ?? line.quantity ?? 0);
+    const oldUnit = line.stock_unit || line.unit || "kg";
+    const isRateOnly = mode === "existing"
+      && ingredientId === line.ingredient_id
+      && Math.abs(qty - oldQuantity) < 0.000001
+      && unit.toLowerCase() === oldUnit.toLowerCase();
     try {
-      await correctLine.mutateAsync({
+      const result = await correctLine.mutateAsync({
         purchase_item_id: line.id,
         ingredient_id: mode === "existing" ? ingredientId : null,
         new_item_name: mode === "new" ? newName.trim() : null,
@@ -132,8 +138,11 @@ function PurchaseCorrectionDialog({ purchase, line, ingredients, onClose }: {
         new_quantity: qty,
         new_rate: itemRate,
         reason: reason.trim(),
+        rate_only_after_issue: isRateOnly,
       });
-      toast.success("Invoice entry, stock aur lot teeno sahi ho gaye");
+      toast.success(result?.rate_only
+        ? "Rate sahi ho gaya; stock quantity bilkul nahi badli"
+        : "Invoice entry, stock aur lot teeno sahi ho gaye");
       onClose();
     } catch (error: any) {
       toast.error(error.message || "Entry sudhar nahi payi");

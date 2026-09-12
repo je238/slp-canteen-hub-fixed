@@ -258,6 +258,7 @@ export function useCorrectPurchaseLine() {
       new_quantity: number;
       new_rate: number;
       reason: string;
+      rate_only_after_issue?: boolean;
     }) => {
       const { data, error } = await supabase.rpc("correct_confirmed_purchase_line" as any, {
         p_purchase_item_id: input.purchase_item_id,
@@ -269,7 +270,24 @@ export function useCorrectPurchaseLine() {
         p_new_rate: input.new_rate,
         p_reason: input.reason,
       });
-      if (error) throw error;
+      if (error) {
+        const issuedLot = error.message?.includes("kitchen issue ho chuka hai");
+        if (!issuedLot || !input.rate_only_after_issue) throw error;
+
+        // Once a lot has been issued, its quantity and identity must stay
+        // immutable. Admins still need an audited way to fix a typing mistake
+        // in the invoice rate, without adding/removing anything from the shelf.
+        const { data: rateData, error: rateError } = await supabase.rpc(
+          "correct_consumed_purchase_line_rate" as any,
+          {
+            p_purchase_item_id: input.purchase_item_id,
+            p_new_rate: input.new_rate,
+            p_reason: input.reason,
+          },
+        );
+        if (rateError) throw rateError;
+        return rateData as any;
+      }
       return data as any;
     },
     onSuccess: () => {
