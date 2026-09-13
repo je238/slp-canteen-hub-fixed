@@ -622,13 +622,23 @@ export type Database = {
           avg_daily_usage: number | null
           canteen_id: string
           category: string
+          carbohydrate_g: number | null
           cost_per_unit: number | null
           created_at: string
           current_stock: number
+          energy_kcal: number | null
+          fat_g: number | null
+          fibre_g: number | null
           id: string
           maximum_stock: number | null
           minimum_stock: number
           name: string
+          nutrition_basis_qty: number
+          nutrition_basis_unit: string
+          nutrition_source: string | null
+          nutrition_updated_at: string | null
+          nutrition_updated_by: string | null
+          protein_g: number | null
           reorder_level: number | null
           shelf_life_days: number | null
           unit: string
@@ -641,13 +651,23 @@ export type Database = {
           avg_daily_usage?: number | null
           canteen_id: string
           category?: string
+          carbohydrate_g?: number | null
           cost_per_unit?: number | null
           created_at?: string
           current_stock?: number
+          energy_kcal?: number | null
+          fat_g?: number | null
+          fibre_g?: number | null
           id?: string
           maximum_stock?: number | null
           minimum_stock?: number
           name: string
+          nutrition_basis_qty?: number
+          nutrition_basis_unit?: string
+          nutrition_source?: string | null
+          nutrition_updated_at?: string | null
+          nutrition_updated_by?: string | null
+          protein_g?: number | null
           reorder_level?: number | null
           shelf_life_days?: number | null
           unit?: string
@@ -660,13 +680,23 @@ export type Database = {
           avg_daily_usage?: number | null
           canteen_id?: string
           category?: string
+          carbohydrate_g?: number | null
           cost_per_unit?: number | null
           created_at?: string
           current_stock?: number
+          energy_kcal?: number | null
+          fat_g?: number | null
+          fibre_g?: number | null
           id?: string
           maximum_stock?: number | null
           minimum_stock?: number
           name?: string
+          nutrition_basis_qty?: number
+          nutrition_basis_unit?: string
+          nutrition_source?: string | null
+          nutrition_updated_at?: string | null
+          nutrition_updated_by?: string | null
+          protein_g?: number | null
           reorder_level?: number | null
           shelf_life_days?: number | null
           unit?: string
@@ -2400,6 +2430,10 @@ export type Database = {
           wastage_qty: number
         }[]
       }
+      meal_profit_analysis: {
+        Args: { p_canteen_id: string; p_end: string; p_start: string }
+        Returns: Json
+      }
       merge_ingredients: {
         Args: { p_from: string; p_into: string }
         Returns: Json
@@ -2434,6 +2468,10 @@ export type Database = {
         }[]
       }
       purge_expired_stock_photos: { Args: never; Returns: number }
+      quantity_in_nutrition_base: {
+        Args: { p_qty: number; p_unit: string }
+        Returns: number
+      }
       record_stock_issue: {
         Args: { p_canteen_id: string; p_items: Json }
         Returns: Json
@@ -2468,6 +2506,20 @@ export type Database = {
           p_yield_unit?: string
         }
         Returns: Json
+      }
+      set_ingredient_nutrition: {
+        Args: {
+          p_basis_qty: number
+          p_basis_unit: string
+          p_carbohydrate_g: number | null
+          p_energy_kcal: number | null
+          p_fat_g: number | null
+          p_fibre_g: number | null
+          p_ingredient_id: string
+          p_protein_g: number | null
+          p_source?: string | null
+        }
+        Returns: Database["public"]["Tables"]["ingredients"]["Row"]
       }
       similar_ingredients: {
         Args: { p_canteen_id: string }

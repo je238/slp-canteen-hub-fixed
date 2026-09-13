@@ -87,6 +87,7 @@ export const NAV: NavEntry[] = [
   { path: "/expenses", label: "Expenses", icon: Wallet, roles: ["ops_manager", ...ADMIN_UP], hideFrom: OPS_ONLY },
   { path: "/budgets", label: "Budgets", icon: Target, roles: ["ops_manager", ...ADMIN_UP], hideFrom: OPS_ONLY },
   { path: "/reports-center", label: "Reports", icon: BarChart3, roles: MANAGER_UP },
+  { path: "/meal-profit", label: "Meal Profit", icon: BarChart3, roles: MANAGER_UP },
   { path: "/site-performance", label: "Site Performance", icon: LayoutDashboard,
     roles: ["ops_manager", ...ADMIN_UP] },
   { path: "/stock-audit", label: "Stock Verification", icon: ClipboardCheck, roles: STORE_AND_ADMIN },

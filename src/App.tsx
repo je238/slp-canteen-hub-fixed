@@ -33,6 +33,7 @@ import CanteenPage from "./pages/CanteenPage";
 import AuditLogPage from "./pages/AuditLogPage";
 import ExecutiveAlertsPage from "./pages/ExecutiveAlertsPage";
 import CentralKitchenPage from "./pages/CentralKitchenPage";
+import MealProfitPage from "./pages/MealProfitPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -125,6 +126,9 @@ const App = () => (
                 } />
                 <Route path="/reports-center" element={
                   <ProtectedRoute minRole="unit_manager"><ReportsCenterPage /></ProtectedRoute>
+                } />
+                <Route path="/meal-profit" element={
+                  <ProtectedRoute minRole="unit_manager"><MealProfitPage /></ProtectedRoute>
                 } />
                 <Route path="/site-performance" element={
                   <ProtectedRoute minRole="ops_manager"><SitePerformancePage /></ProtectedRoute>
