@@ -237,3 +237,4 @@ REVOKE ALL ON FUNCTION public.manager_correct_requisition(uuid,jsonb,text) FROM 
 COMMENT ON FUNCTION public.manager_review_requisition(uuid,jsonb,boolean,text) IS
   'Atomically sets Manager final items/quantities and approves or rejects a pending Chef requisition.';
 
+NOTIFY pgrst, 'reload schema';
