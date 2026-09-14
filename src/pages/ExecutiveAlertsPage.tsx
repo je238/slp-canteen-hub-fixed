@@ -17,7 +17,7 @@ import { toast } from "sonner";
 const IMPORTANT_ACTIONS = [
   "stock_adjusted","rate_corrected","ingredient_renamed","ingredient_unit_changed","ingredient_removed","ingredient_merged",
   "purchase_line_corrected","purchase_reversed","manager_corrected_requisition","admin_corrected_requisition",
-  "confirmed_purchase_line_corrected",
+  "confirmed_purchase_line_corrected","consumed_purchase_line_rate_corrected",
   "requisition_cancelled","requisition_sent_back","chef_closed_pending_quantity","operational_alert_reviewed",
 ];
 
@@ -43,6 +43,8 @@ type FeedItem={
   reason?:string; person?:string; impact?:number; reviewId?:string; to?:string;
   details?:{label:string;value:string}[]; history?:{date:string;meal?:string;req_no?:number;issued_qty:number}[];
   attachments?:{id:string;path:string;label:string;amount?:number|null;billDate?:string|null;uploadedAt:string;uploadedBy:string}[];
+  invoiceLines?:{id:string;item:string;quantity:number;unit:string;rate:number;total:number}[];
+  invoiceCorrections?:{id:string;at:string;by:string;reason:string;oldValues:any;newValues:any}[];
 };
 
 export default function ExecutiveAlertsPage(){
@@ -65,7 +67,7 @@ export default function ExecutiveAlertsPage(){
       const [fraud,logs,purchases,scans,units,operations]=await Promise.all([
         supabase.from("fraud_alerts").select("*").in("status",["open","reviewed","escalated"]).order("created_at",{ascending:false}).limit(200),
         supabase.from("action_logs").select("id,user_id,action,entity_type,canteen_id,details,created_at").in("action",IMPORTANT_ACTIONS).gte("created_at",from).order("created_at",{ascending:false}).limit(300),
-        supabase.from("purchases").select("id,canteen_id,supplier_id,status,total_amount,stated_total,bill_status,payment_status,invoice_image_url,bill_received_at,approved_at,created_at,created_by,suppliers(name),purchase_items(id,ingredient_id,item_name,quantity,unit,rate,total,matched),purchase_invoice_files(id,image_path,bill_number,bill_date,amount,uploaded_by,created_at)").eq("status","confirmed").gte("created_at",from).order("created_at",{ascending:true}),
+        supabase.from("purchases").select("id,canteen_id,supplier_id,status,total_amount,stated_total,bill_status,payment_status,invoice_image_url,bill_received_at,approved_at,created_at,created_by,suppliers(name),purchase_items(id,ingredient_id,item_name,quantity,unit,rate,total,matched),purchase_invoice_files(id,image_path,bill_number,bill_date,amount,uploaded_by,created_at),purchase_line_corrections(id,corrected_by,reason,old_values,new_values,created_at)").eq("status","confirmed").gte("created_at",from).order("created_at",{ascending:true}),
         supabase.from("ocr_scan_events" as any).select("id,canteen_id,status,error_message,duration_ms,created_at,user_id").gte("created_at",sinceIso(7)).order("created_at",{ascending:false}),
         supabase.from("historical_unit_review" as any).select("purchase_item_id,canteen_id,created_at,item_name,bill_unit,master_unit,conversion_confirmed,conversion_note").eq("conversion_confirmed",false),
         supabase.rpc("executive_alert_details" as any,{p_date:todayIso()}),
@@ -79,6 +81,21 @@ export default function ExecutiveAlertsPage(){
     if(!raw)return [] as FeedItem[];
     const out:FeedItem[]=[];
     const purchaseById=new Map(raw.purchases.map((purchase:any)=>[purchase.id,purchase]));
+    const purchaseEvidence=(purchase:any):NonNullable<FeedItem["attachments"]>=>{
+      const files:any[]=purchase?.purchase_invoice_files||[];
+      const attachments:NonNullable<FeedItem["attachments"]>=files.map((bill:any,index:number)=>({
+        id:bill.id,path:bill.image_path,label:bill.bill_number?`Bill ${bill.bill_number}`:`Bill ${index+1}`,
+        amount:bill.amount,billDate:bill.bill_date,uploadedAt:bill.created_at,
+        uploadedBy:users[bill.uploaded_by]||"Store Keeper",
+      }));
+      if(purchase?.invoice_image_url&&!attachments.length)attachments.push({
+        id:`purchase-${purchase.id}`,path:purchase.invoice_image_url,label:"Original invoice",
+        amount:purchase.stated_total??purchase.total_amount,billDate:null,
+        uploadedAt:purchase.bill_received_at||purchase.created_at,
+        uploadedBy:users[purchase.created_by]||"Store Keeper",
+      });
+      return attachments;
+    };
     const priorPurchaseLine=(ingredientId:string,purchaseAt:string)=>{
       let found:any=null;
       for(const purchase of raw.purchases){
@@ -95,17 +112,7 @@ export default function ExecutiveAlertsPage(){
       const previous=purchase&&row.ingredient_id?priorPurchaseLine(row.ingredient_id,purchase.created_at):null;
       const unit=line?.unit||previous?.line?.unit||"unit";
       const details:{label:string;value:string}[]=[];
-      const billFiles:any[]=purchase?.purchase_invoice_files||[];
-      const attachments:FeedItem["attachments"]=billFiles.map((bill:any,index:number)=>({
-        id:bill.id,path:bill.image_path,label:bill.bill_number?`Bill ${bill.bill_number}`:`Bill ${index+1}`,
-        amount:bill.amount,billDate:bill.bill_date,uploadedAt:bill.created_at,
-        uploadedBy:users[bill.uploaded_by]||"Store Keeper",
-      }));
-      if(purchase?.invoice_image_url&&!attachments.length)attachments.push({
-        id:`purchase-${purchase.id}`,path:purchase.invoice_image_url,label:"Original invoice",
-        amount:purchase.stated_total??purchase.total_amount,billDate:null,uploadedAt:purchase.bill_received_at||purchase.created_at,
-        uploadedBy:users[purchase.created_by]||"Store Keeper",
-      });
+      const attachments=purchaseEvidence(purchase);
       if(purchase){
         details.push(
           {label:"Ye purchase kab hua",value:dateTime(purchase.created_at)},
@@ -222,7 +229,37 @@ export default function ExecutiveAlertsPage(){
     const rateHistory=new Map<string,number[]>();
     for(const p of raw.purchases){
       const lines:any[]=p.purchase_items||[];const lineTotal=lines.reduce((s,l)=>s+Number(l.total||0),0);
-      if(p.stated_total!=null&&Math.abs(Number(p.stated_total)-lineTotal)>1)out.push({key:`total-${p.id}`,source:"automatic",siteId:p.canteen_id,site:siteNames[p.canteen_id]||"Site",title:"Invoice total aur lines mismatch",description:p.suppliers?.name||"Vendor",severity:"critical",status:"open",at:p.created_at,oldValue:money(p.stated_total),newValue:money(lineTotal),reason:"Invoice header total differs from sum of confirmed lines",person:users[p.created_by]||"—",impact:Math.abs(Number(p.stated_total)-lineTotal)});
+      if(p.stated_total!=null&&Math.abs(Number(p.stated_total)-lineTotal)>1){
+        const attachments=purchaseEvidence(p);
+        const corrections:any[]=p.purchase_line_corrections||[];
+        out.push({
+          key:`total-${p.id}`,source:"automatic",siteId:p.canteen_id,site:siteNames[p.canteen_id]||"Site",
+          title:"Invoice total aur lines mismatch",description:p.suppliers?.name||"Vendor nahi dala",
+          severity:"critical",status:"open",at:p.created_at,
+          oldValue:`Scan / bill total ${money(p.stated_total)}`,newValue:`Confirmed lines ${money(lineTotal)}`,
+          reason:"Bill par likha total aur app me confirmed item lines ka total match nahi hai",
+          person:users[p.created_by]||"Store Keeper",impact:Math.abs(Number(p.stated_total)-lineTotal),to:"/purchases",
+          details:[
+            {label:"Vendor",value:p.suppliers?.name||"Vendor nahi dala"},
+            {label:"Store Keeper entry",value:users[p.created_by]||"User record unavailable"},
+            {label:"Purchase kab chadhaya",value:dateTime(p.created_at)},
+            {label:"Invoice kab upload hua",value:attachments.length?dateTime(attachments[0].uploadedAt):"Photo attach nahi hai"},
+            {label:"Scan / bill me total",value:money(p.stated_total)},
+            {label:"Confirmed lines ka total",value:money(lineTotal)},
+            {label:"Difference",value:money(Math.abs(Number(p.stated_total)-lineTotal))},
+            {label:"Confirmed item lines",value:String(lines.length)},
+          ],
+          attachments,
+          invoiceLines:lines.map((line:any)=>({
+            id:line.id,item:line.item_name||"Unnamed item",quantity:Number(line.quantity||0),
+            unit:line.unit||"",rate:Number(line.rate||0),total:Number(line.total||0),
+          })),
+          invoiceCorrections:corrections.map((change:any)=>({
+            id:change.id,at:change.created_at,by:users[change.corrected_by]||"User record unavailable",
+            reason:change.reason||"Reason nahi mila",oldValues:change.old_values||{},newValues:change.new_values||{},
+          })),
+        });
+      }
       if(p.bill_status==="pending")out.push({key:`bill-${p.id}`,source:"automatic",siteId:p.canteen_id,site:siteNames[p.canteen_id]||"Site",title:"Goods received, bill pending",description:p.suppliers?.name||"No supplier",severity:"warning",status:"open",at:p.created_at,oldValue:"No bill",newValue:`${Math.floor((Date.now()-new Date(p.created_at).getTime())/86400000)} days`,reason:"Invoice photo/files abhi attach nahi hue",person:users[p.created_by]||"—",impact:Number(p.total_amount||0)});
       for(const l of lines){
         if(l.matched===false)out.push({key:`match-${l.id}`,source:"automatic",siteId:p.canteen_id,site:siteNames[p.canteen_id]||"Site",title:"Invoice item match verify karein",description:l.item_name,severity:"warning",status:"open",at:p.created_at,oldValue:"Unmatched",newValue:l.unit,reason:"Scanner/manual line kisi existing inventory item se confidently match nahi hui",person:users[p.created_by]||"—",impact:Number(l.total||0)});
@@ -267,7 +304,7 @@ export default function ExecutiveAlertsPage(){
 function Stat({label,value,bad}:{label:string;value:number;bad?:boolean}){return <Card className="border-none shadow-sm"><CardContent className="p-3"><p className="text-xs text-muted-foreground">{label}</p><p className={`text-xl font-bold ${bad&&value>0?"text-destructive":""}`}>{value}</p></CardContent></Card>}
 
 function AlertCard({item,open,onToggle,onGo,onReview}:{item:FeedItem;open:boolean;onToggle:()=>void;onGo?:()=>void;onReview?:()=>void}){
-  const hasDetail=!!item.details?.length||!!item.history?.length||!!item.attachments?.length;
+  const hasDetail=!!item.details?.length||!!item.history?.length||!!item.attachments?.length||!!item.invoiceLines?.length||item.invoiceCorrections!==undefined;
   return <Card className={`border-none shadow-sm ${item.severity==="critical"?"bg-destructive/5":item.severity==="warning"?"bg-warning/5":""}`}>
     <CardContent className="p-4">
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
@@ -296,6 +333,8 @@ function AlertCard({item,open,onToggle,onGo,onReview}:{item:FeedItem;open:boolea
       {hasDetail&&open?<div className="mt-3 border-t pt-3 space-y-3">
         {!!item.details?.length&&<div className="grid grid-cols-2 md:grid-cols-4 gap-2">{item.details.map((d,index)=><div key={`${d.label}-${index}`} className="rounded-lg bg-background/80 border p-2.5"><p className="text-[10px] text-muted-foreground">{d.label}</p><p className="text-sm font-semibold break-words mt-0.5">{d.value}</p></div>)}</div>}
         {!!item.attachments?.length&&<div><p className="text-xs font-semibold mb-2">Purchase ke saath laga bill</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{item.attachments.map(file=><InvoiceEvidence key={file.id} file={file}/>)}</div></div>}
+        {!!item.invoiceLines?.length&&<div><p className="text-xs font-semibold mb-2">App me confirmed invoice lines</p><div className="overflow-x-auto rounded-lg border bg-background/80"><table className="w-full text-xs"><thead><tr className="border-b text-muted-foreground"><th className="text-left p-2">Item</th><th className="text-right p-2">Quantity</th><th className="text-right p-2">Rate</th><th className="text-right p-2">Line total</th></tr></thead><tbody>{item.invoiceLines.map(line=><tr key={line.id} className="border-b last:border-0"><td className="p-2 font-medium">{line.item}</td><td className="p-2 text-right whitespace-nowrap">{qty(line.quantity,line.unit)}</td><td className="p-2 text-right whitespace-nowrap">{money(line.rate)} / {line.unit||"unit"}</td><td className="p-2 text-right font-semibold whitespace-nowrap">{money(line.total)}</td></tr>)}</tbody></table></div></div>}
+        {item.invoiceCorrections!==undefined&&<div><p className="text-xs font-semibold mb-2">Save hone ke baad kaunsi line badli</p>{item.invoiceCorrections.length?<div className="space-y-2">{item.invoiceCorrections.map(change=>{const oldValue=change.oldValues||{};const newValue=change.newValues||{};return <div key={change.id} className="rounded-lg border bg-background/80 p-3 text-xs"><p className="font-semibold">{oldValue.item_name||newValue.item_name||"Invoice line"}</p><p className="mt-1">Pehle: <span className="font-medium">{qty(oldValue.quantity,oldValue.unit)} × {money(oldValue.rate)} = {money(oldValue.total)}</span></p><p>Ab: <span className="font-medium">{qty(newValue.quantity,newValue.unit)} × {money(newValue.rate)} = {money(newValue.total)}</span></p><p className="mt-1 text-muted-foreground">{change.by} · {dateTime(change.at)} · {change.reason}</p></div>;})}</div>:<div className="rounded-lg border bg-background/80 p-3 text-xs text-muted-foreground">Save hone ke baad koi line correction record nahi hui. Difference initial scan/confirmation ke time se hai; bill photo se line verify karein.</div>}</div>}
         {!!item.history?.length&&<div><p className="text-xs font-semibold mb-2">Pehle kab kitna issue hua</p><div className="overflow-x-auto rounded-lg border bg-background/80"><table className="w-full text-xs"><thead><tr className="border-b text-muted-foreground"><th className="text-left p-2">Date</th><th className="text-left p-2">Meal</th><th className="text-left p-2">Order</th><th className="text-right p-2">Issued</th></tr></thead><tbody>{item.history.map((h,index)=><tr key={index} className="border-b last:border-0"><td className="p-2 whitespace-nowrap">{h.date}</td><td className="p-2">{mealLabel(h.meal)}</td><td className="p-2">{h.req_no?`REQ-${h.req_no}`:"—"}</td><td className="p-2 text-right font-semibold">{qty(h.issued_qty)}</td></tr>)}</tbody></table></div></div>}
       </div>:null}
 
