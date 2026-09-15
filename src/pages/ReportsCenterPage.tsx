@@ -6,7 +6,7 @@ import {
   usePurchaseReport, useConsumptionReport, useOperationsSummary, useStockAgeing,
   useStockInOutReport, usePeriodSummary,
   useWastageLog, useOwnerMenuProfitBreakdown, useMenuPlans,
-  useDailyItemUsageRateTrend, useItemPurchaseRateHistory,
+  useDailyItemUsageRateTrend, useItemPurchaseRateHistory, useVegetablePurchaseReport,
 } from "@/hooks/useSrsData";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -129,6 +129,8 @@ export default function ReportsCenterPage() {
       ? requestedTab : canViewProfit ? "profit" : "purchase");
 
   const { data: purchase } = usePurchaseReport(selectedCanteen, from, to);
+  const { data: vegetablePurchases, isLoading: vegetablePurchasesLoading } =
+    useVegetablePurchaseReport(selectedCanteen, from, to);
   const { data: consumption } = useConsumptionReport(selectedCanteen, from, to);
   const { data: ops } = useOperationsSummary(selectedCanteen, from, to);
   const { data: ageing } = useStockAgeing(selectedCanteen);
@@ -211,6 +213,13 @@ export default function ReportsCenterPage() {
   const byVendor = pick(purchase, "vendor");
   const byItem = pick(purchase, "item");
   const byDay = pick(purchase, "day");
+  const vegetableRows = (vegetablePurchases || []) as any[];
+  const vegetableSummary = useMemo(() => ({
+    amount: vegetableRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+    purchases: new Set(vegetableRows.map((row) => row.purchase_id)).size,
+    vendors: new Set(vegetableRows.map((row) => row.vendor_name)).size,
+    items: new Set(vegetableRows.map((row) => row.item_name)).size,
+  }), [vegetablePurchases]);
   const consByItem = pick(consumption, "item");
   const consByDay = pick(consumption, "day");
   const itemTrendRows = useMemo(() => {
@@ -825,6 +834,56 @@ export default function ReportsCenterPage() {
 
           {/* ---------- Purchase ---------- */}
           <TabsContent value="purchase" className="mt-3 space-y-4">
+            <Card className="border-none shadow-sm">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="text-sm">Vegetable purchase detail</CardTitle>
+                  <p className="mt-1 text-xs text-muted-foreground">Selected dates me kis vendor se, kitni quantity aur kis rate par vegetables aaye.</p>
+                </div>
+                <Button variant="outline" size="sm" className="text-xs"
+                  disabled={!vegetableRows.length}
+                  onClick={() => exportCsv(`vegetable-purchase-${from}_${to}.csv`, [
+                    ["Purchase date", "Vendor", "Item", "Quantity", "Unit", "Rate", "Amount"],
+                    ...vegetableRows.map((r: any) => [r.purchase_date, r.vendor_name, r.item_name, num(r.quantity), r.unit, num(r.rate), Math.round(Number(r.amount || 0))]),
+                  ])}>
+                  <Download className="w-3.5 h-3.5 mr-1" /> CSV
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                  {[
+                    ["Vegetable purchase", money(vegetableSummary.amount)],
+                    ["Purchase bills", vegetableSummary.purchases],
+                    ["Vendors", vegetableSummary.vendors],
+                    ["Vegetable items", vegetableSummary.items],
+                  ].map(([label, value]) => <div key={String(label)} className="rounded-lg bg-muted/60 p-3"><p className="text-[10px] text-muted-foreground">{label}</p><p className="font-bold">{value}</p></div>)}
+                </div>
+                <div className="max-h-[28rem] overflow-auto rounded-lg border">
+                  <Table>
+                    <TableHeader><TableRow>
+                      <TableHead className="text-xs whitespace-nowrap">Date</TableHead>
+                      <TableHead className="text-xs">Vendor</TableHead>
+                      <TableHead className="text-xs">Vegetable</TableHead>
+                      <TableHead className="text-xs text-right whitespace-nowrap">Quantity</TableHead>
+                      <TableHead className="text-xs text-right whitespace-nowrap">Rate</TableHead>
+                      <TableHead className="text-xs text-right whitespace-nowrap">Total</TableHead>
+                    </TableRow></TableHeader>
+                    <TableBody>
+                      {vegetablePurchasesLoading ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Vegetable purchases load ho rahe hain…</TableCell></TableRow>
+                        : vegetableRows.length === 0 ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Selected dates me vegetable purchase nahi mili.</TableCell></TableRow>
+                        : vegetableRows.map((r: any) => <TableRow key={r.purchase_item_id}>
+                          <TableCell className="text-xs whitespace-nowrap">{purchaseTime(r.purchased_at)}</TableCell>
+                          <TableCell className="text-sm">{r.vendor_name}</TableCell>
+                          <TableCell className="text-sm font-medium">{r.item_name}</TableCell>
+                          <TableCell className="text-sm text-right whitespace-nowrap">{num(r.quantity)} {r.unit}</TableCell>
+                          <TableCell className="text-sm text-right whitespace-nowrap">₹{num(r.rate)}/{r.unit}</TableCell>
+                          <TableCell className="text-sm text-right font-semibold whitespace-nowrap">{money(r.amount)}</TableCell>
+                        </TableRow>)}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
             <div className="grid lg:grid-cols-2 gap-4">
               <Card className="border-none shadow-sm">
                 <CardHeader className="pb-2 flex flex-row items-center justify-between">

@@ -739,6 +739,48 @@ function useReportRpc(name: string, key: string, canteenId?: string, from?: stri
 export const usePurchaseReport = (c?: string, f?: string, t?: string) =>
   useReportRpc("purchase_report", "purchaseReport", c, f, t);
 
+export function useVegetablePurchaseReport(canteenId?: string, from?: string, to?: string) {
+  const reportFrom = clampToCutover(from);
+  return useQuery({
+    queryKey: ["vegetablePurchaseReport", canteenId, reportFrom, to],
+    enabled: !!canteenId && canteenId !== "all" && !!reportFrom && !!to,
+    queryFn: async () => {
+      const endExclusive = new Date(`${to}T00:00:00+05:30`);
+      endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+      const { data, error } = await (supabase as any)
+        .from("purchases")
+        .select("id, created_at, suppliers(name), purchase_items(id, item_name, quantity, unit, rate, total, ingredients(name, category))")
+        .eq("canteen_id", canteenId)
+        .eq("status", "confirmed")
+        .gte("created_at", new Date(`${reportFrom}T00:00:00+05:30`).toISOString())
+        .lt("created_at", endExclusive.toISOString())
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+
+      return (data || []).flatMap((purchase: any) =>
+        (purchase.purchase_items || [])
+          .filter((line: any) => {
+            const category = String(line.ingredients?.category || "").trim().toLowerCase();
+            return category.includes("vegetable") || ["veg", "sabzi"].includes(category);
+          })
+          .map((line: any) => ({
+            purchase_id: purchase.id,
+            purchase_item_id: line.id,
+            purchase_date: new Date(purchase.created_at).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }),
+            purchased_at: purchase.created_at,
+            vendor_name: purchase.suppliers?.name || "Vendor nahi dala",
+            item_name: line.ingredients?.name || line.item_name,
+            category: line.ingredients?.category || "Uncategorised",
+            quantity: Number(line.quantity || 0),
+            unit: line.unit || "unit",
+            rate: Number(line.rate || 0),
+            amount: Number(line.total ?? (Number(line.quantity || 0) * Number(line.rate || 0))),
+          })),
+      );
+    },
+  });
+}
+
 export const useConsumptionReport = (c?: string, f?: string, t?: string) =>
   useReportRpc("consumption_report", "consumptionReport", c, f, t);
 
