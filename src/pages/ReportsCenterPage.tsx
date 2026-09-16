@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronDown, Download, Image as ImageIcon, Share2 } from "lucide-react";
+import { ChevronDown, Download, Image as ImageIcon, Search, Share2 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { clampToCutover, REPORTING_CUTOVER_DATE } from "@/lib/cutover";
 import { fmtDayDate } from "@/lib/date";
@@ -120,6 +120,7 @@ export default function ReportsCenterPage() {
   const [expandedMeal, setExpandedMeal] = useState<string | null>(null);
   const [expandedMenu, setExpandedMenu] = useState<string | null>(null);
   const [itemTrendSearch, setItemTrendSearch] = useState("");
+  const [reportSearch, setReportSearch] = useState("");
   const [expandedRateItem, setExpandedRateItem] = useState<string | null>(null);
   // Unit managers run the site and need the complete menu-wise business view.
   // The RPC repeats this permission check in the database.
@@ -314,6 +315,27 @@ export default function ReportsCenterPage() {
   const dead = (ageing || []).filter((a: any) => a.movement_class === "dead");
   const slow = (ageing || []).filter((a: any) => a.movement_class === "slow");
   const fast = (ageing || []).filter((a: any) => a.movement_class === "fast");
+  const searchText = reportSearch.trim().toLowerCase();
+  const matchesSearch = (...values: any[]) => !searchText || values
+    .filter((value) => value != null)
+    .some((value) => String(value).toLowerCase().includes(searchText));
+  const visibleVegetableRows = vegetableRows.filter((row: any) =>
+    matchesSearch(row.item_name, row.vendor_name, row.purchase_date, row.unit));
+  const visibleVendors = byVendor.filter((row: any) => matchesSearch(row.label));
+  const visiblePurchaseItems = byItem.filter((row: any) => matchesSearch(row.label, row.unit));
+  const visibleStockMove = (stockMove || []).filter((row: any) =>
+    (Number(row.stock_in) || Number(row.stock_out) || Number(row.adjustments) || Number(row.closing))
+      && matchesSearch(row.name, row.unit));
+  const visibleReorder = reorderList.filter((row: any) => matchesSearch(row.name, row.unit));
+  const visibleAgeing = (ageing || []).filter((row: any) =>
+    matchesSearch(row.name, row.unit, row.movement_class));
+  const visibleConsumption = consByItem.filter((row: any) => matchesSearch(row.label, row.unit));
+  const visibleWastage = ((wastage || []) as any[]).filter((row: any) =>
+    matchesSearch(row.dish, row.meal_period, row.recorded_by, row.menu_date, row.unit));
+  const visibleTopItems = ((summary?.top_items || []) as any[]).filter((row: any) =>
+    matchesSearch(row.name, row.unit));
+  const visibleSummaryVendors = ((summary?.vendors || []) as any[]).filter((row: any) =>
+    matchesSearch(row.vendor));
 
   if (selectedCanteen === "all") {
     return (
@@ -371,7 +393,7 @@ export default function ReportsCenterPage() {
           ))}
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={(value) => { setActiveTab(value); setReportSearch(""); }}>
           <TabsList className="flex-wrap h-auto">
             {canViewProfit && <TabsTrigger value="profit">Menu Profit & Item Spend</TabsTrigger>}
             <TabsTrigger value="purchase">Purchase</TabsTrigger>
@@ -382,6 +404,21 @@ export default function ReportsCenterPage() {
             <TabsTrigger value="operations">Operations</TabsTrigger>
             <TabsTrigger value="summary">Weekly / Monthly</TabsTrigger>
           </TabsList>
+
+          {["purchase", "inventory", "stockmove", "consumption", "operations", "summary"].includes(activeTab) && (
+            <div className="relative mt-3 w-full sm:max-w-sm">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={reportSearch}
+                onChange={(event) => setReportSearch(event.target.value)}
+                className="pl-9"
+                placeholder={activeTab === "purchase" ? "Item ya vendor search"
+                  : activeTab === "operations" ? "Dish, meal ya manager search"
+                    : "Item search — e.g. Onion"}
+                aria-label="Report search"
+              />
+            </div>
+          )}
 
           {/* ---------- Owner / GM profitability ---------- */}
           {canViewProfit && (
@@ -676,7 +713,7 @@ export default function ReportsCenterPage() {
                 <Button variant="outline" size="sm" className="text-xs"
                   onClick={() => exportCsv(`stock-in-out-${from}_${to}.csv`,
                     [["Item", "Unit", "Opening", "In", "Out", "Adjust", "Closing", "In ₹", "Out ₹", "Closing ₹"],
-                     ...(stockMove || []).map((r: any) => [r.name, r.unit, num(r.opening), num(r.stock_in),
+                     ...visibleStockMove.map((r: any) => [r.name, r.unit, num(r.opening), num(r.stock_in),
                        num(r.stock_out), num(r.adjustments), num(r.closing),
                        Math.round(r.in_value), Math.round(r.out_value), Math.round(r.closing_value)])])}>
                   <Download className="w-3.5 h-3.5 mr-1" /> CSV
@@ -694,9 +731,7 @@ export default function ReportsCenterPage() {
                     <TableHead className="text-xs text-right">Closing ₹</TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
-                    {(stockMove || []).filter((r: any) =>
-                      Number(r.stock_in) || Number(r.stock_out) || Number(r.adjustments) || Number(r.closing)
-                    ).map((r: any) => (
+                    {visibleStockMove.map((r: any) => (
                       <TableRow key={r.ingredient_id}>
                         <TableCell className="text-sm">{r.name} <span className="text-xs text-muted-foreground">({r.unit})</span></TableCell>
                         <TableCell className="text-sm text-right">{num(r.opening)}</TableCell>
@@ -709,7 +744,7 @@ export default function ReportsCenterPage() {
                         <TableCell className="text-sm text-right">{money(r.closing_value)}</TableCell>
                       </TableRow>
                     ))}
-                    {(stockMove || []).length === 0 && (
+                    {visibleStockMove.length === 0 && (
                       <TableRow><TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-8">
                         No movement in this period, or the report migration isn't applied yet.
                       </TableCell></TableRow>
@@ -792,9 +827,9 @@ export default function ReportsCenterPage() {
                       <TableHead className="text-xs text-right">Value</TableHead>
                     </TableRow></TableHeader>
                     <TableBody>
-                      {(summary?.top_items || []).length === 0 ? (
+                      {visibleTopItems.length === 0 ? (
                         <TableRow><TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-6">No consumption yet.</TableCell></TableRow>
-                      ) : (summary?.top_items || []).map((t: any) => (
+                      ) : visibleTopItems.map((t: any) => (
                         <TableRow key={t.name}>
                           <TableCell className="text-sm">{t.name}</TableCell>
                           <TableCell className="text-sm text-right">{num(t.qty)} {t.unit}</TableCell>
@@ -816,9 +851,9 @@ export default function ReportsCenterPage() {
                       <TableHead className="text-xs text-right">Amount</TableHead>
                     </TableRow></TableHeader>
                     <TableBody>
-                      {(summary?.vendors || []).length === 0 ? (
+                      {visibleSummaryVendors.length === 0 ? (
                         <TableRow><TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-6">No purchases yet.</TableCell></TableRow>
-                      ) : (summary?.vendors || []).map((v: any) => (
+                      ) : visibleSummaryVendors.map((v: any) => (
                         <TableRow key={v.vendor}>
                           <TableCell className="text-sm">{v.vendor}</TableCell>
                           <TableCell className="text-sm text-right">{v.bills}</TableCell>
@@ -841,10 +876,10 @@ export default function ReportsCenterPage() {
                   <p className="mt-1 text-xs text-muted-foreground">Selected dates me kis vendor se, kitni quantity aur kis rate par vegetables aaye.</p>
                 </div>
                 <Button variant="outline" size="sm" className="text-xs"
-                  disabled={!vegetableRows.length}
+                  disabled={!visibleVegetableRows.length}
                   onClick={() => exportCsv(`vegetable-purchase-${from}_${to}.csv`, [
                     ["Purchase date", "Vendor", "Item", "Quantity", "Unit", "Rate", "Amount"],
-                    ...vegetableRows.map((r: any) => [r.purchase_date, r.vendor_name, r.item_name, num(r.quantity), r.unit, num(r.rate), Math.round(Number(r.amount || 0))]),
+                    ...visibleVegetableRows.map((r: any) => [r.purchase_date, r.vendor_name, r.item_name, num(r.quantity), r.unit, num(r.rate), Math.round(Number(r.amount || 0))]),
                   ])}>
                   <Download className="w-3.5 h-3.5 mr-1" /> CSV
                 </Button>
@@ -870,8 +905,8 @@ export default function ReportsCenterPage() {
                     </TableRow></TableHeader>
                     <TableBody>
                       {vegetablePurchasesLoading ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Vegetable purchases load ho rahe hain…</TableCell></TableRow>
-                        : vegetableRows.length === 0 ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Selected dates me vegetable purchase nahi mili.</TableCell></TableRow>
-                        : vegetableRows.map((r: any) => <TableRow key={r.purchase_item_id}>
+                        : visibleVegetableRows.length === 0 ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Search ya selected dates me vegetable purchase nahi mili.</TableCell></TableRow>
+                        : visibleVegetableRows.map((r: any) => <TableRow key={r.purchase_item_id}>
                           <TableCell className="text-xs whitespace-nowrap">{purchaseTime(r.purchased_at)}</TableCell>
                           <TableCell className="text-sm">{r.vendor_name}</TableCell>
                           <TableCell className="text-sm font-medium">{r.item_name}</TableCell>
@@ -890,7 +925,7 @@ export default function ReportsCenterPage() {
                   <CardTitle className="text-sm">Vendor-wise purchase</CardTitle>
                   <Button variant="outline" size="sm" className="text-xs"
                     onClick={() => exportCsv(`vendor-purchase-${from}_${to}.csv`,
-                      [["Vendor", "Bills", "Amount"], ...byVendor.map((r: any) => [r.label, r.txn_count, Math.round(r.amount)])])}>
+                      [["Vendor", "Bills", "Amount"], ...visibleVendors.map((r: any) => [r.label, r.txn_count, Math.round(r.amount)])])}>
                     <Download className="w-3.5 h-3.5 mr-1" /> CSV
                   </Button>
                 </CardHeader>
@@ -902,9 +937,9 @@ export default function ReportsCenterPage() {
                       <TableHead className="text-xs text-right">Amount</TableHead>
                     </TableRow></TableHeader>
                     <TableBody>
-                      {byVendor.length === 0 ? (
+                      {visibleVendors.length === 0 ? (
                         <TableRow><TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-6">No confirmed purchases in this period.</TableCell></TableRow>
-                      ) : byVendor.map((r: any) => (
+                      ) : visibleVendors.map((r: any) => (
                         <TableRow key={r.label}>
                           <TableCell className="text-sm">{r.label}</TableCell>
                           <TableCell className="text-sm text-right">{r.txn_count}</TableCell>
@@ -939,7 +974,7 @@ export default function ReportsCenterPage() {
                 <CardTitle className="text-sm">Item-wise purchase</CardTitle>
                 <Button variant="outline" size="sm" className="text-xs"
                   onClick={() => exportCsv(`item-purchase-${from}_${to}.csv`,
-                    [["Item", "Qty", "Amount"], ...byItem.map((r: any) => [r.label, num(r.qty), Math.round(r.amount)])])}>
+                    [["Item", "Qty", "Amount"], ...visiblePurchaseItems.map((r: any) => [r.label, num(r.qty), Math.round(r.amount)])])}>
                   <Download className="w-3.5 h-3.5 mr-1" /> CSV
                 </Button>
               </CardHeader>
@@ -951,7 +986,10 @@ export default function ReportsCenterPage() {
                     <TableHead className="text-xs text-right">Amount</TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
-                    {byItem.map((r: any) => (
+                    {visiblePurchaseItems.length === 0 && (
+                      <TableRow><TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">Matching item nahi mila.</TableCell></TableRow>
+                    )}
+                    {visiblePurchaseItems.map((r: any) => (
                       <TableRow key={r.label}>
                         <TableCell className="text-sm">{r.label}</TableCell>
                         <TableCell className="text-sm text-right">{num(r.qty)}</TableCell>
@@ -994,7 +1032,10 @@ export default function ReportsCenterPage() {
                       <TableHead className="text-xs text-right">Max level</TableHead>
                     </TableRow></TableHeader>
                     <TableBody>
-                      {reorderList.map((i: any) => (
+                      {visibleReorder.length === 0 && (
+                        <TableRow><TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">Matching reorder item nahi mila.</TableCell></TableRow>
+                      )}
+                      {visibleReorder.map((i: any) => (
                         <TableRow key={i.id} className="bg-destructive/5">
                           <TableCell className="text-sm font-medium">{i.name}</TableCell>
                           <TableCell className="text-sm text-right text-destructive font-semibold">
@@ -1016,7 +1057,7 @@ export default function ReportsCenterPage() {
                 <Button variant="outline" size="sm" className="text-xs"
                   onClick={() => exportCsv(`stock-ageing.csv`,
                     [["Item", "Stock", "Value", "Days since movement", "Days of stock", "Class"],
-                     ...(ageing || []).map((a: any) => [a.name, num(a.current_stock), Math.round(a.stock_value),
+                     ...visibleAgeing.map((a: any) => [a.name, num(a.current_stock), Math.round(a.stock_value),
                        a.days_since_movement ?? "", a.days_of_stock ?? "", a.movement_class])])}>
                   <Download className="w-3.5 h-3.5 mr-1" /> CSV
                 </Button>
@@ -1032,11 +1073,11 @@ export default function ReportsCenterPage() {
                     <TableHead className="text-xs">Class</TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
-                    {(ageing || []).length === 0 ? (
+                    {visibleAgeing.length === 0 ? (
                       <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-6">
-                        Ageing needs the report migration applied.
+                        Matching inventory item nahi mila.
                       </TableCell></TableRow>
-                    ) : (ageing || []).map((a: any) => (
+                    ) : visibleAgeing.map((a: any) => (
                       <TableRow key={a.ingredient_id}>
                         <TableCell className="text-sm">{a.name}</TableCell>
                         <TableCell className="text-sm text-right">{num(a.current_stock)} {a.unit}</TableCell>
@@ -1212,7 +1253,7 @@ export default function ReportsCenterPage() {
                   <CardTitle className="text-sm">Item-wise consumption</CardTitle>
                   <Button variant="outline" size="sm" className="text-xs"
                     onClick={() => exportCsv(`consumption-${from}_${to}.csv`,
-                      [["Item", "Qty", "Unit", "Value"], ...consByItem.map((r: any) => [r.label, num(r.qty), r.unit || "", Math.round(r.value)])])}>
+                      [["Item", "Qty", "Unit", "Value"], ...visibleConsumption.map((r: any) => [r.label, num(r.qty), r.unit || "", Math.round(r.value)])])}>
                     <Download className="w-3.5 h-3.5 mr-1" /> CSV
                   </Button>
                 </CardHeader>
@@ -1224,9 +1265,9 @@ export default function ReportsCenterPage() {
                       <TableHead className="text-xs text-right">Value</TableHead>
                     </TableRow></TableHeader>
                     <TableBody>
-                      {consByItem.length === 0 ? (
+                      {visibleConsumption.length === 0 ? (
                         <TableRow><TableCell colSpan={3} className="text-center text-sm text-muted-foreground py-6">No consumption recorded.</TableCell></TableRow>
-                      ) : consByItem.map((r: any) => (
+                      ) : visibleConsumption.map((r: any) => (
                         <TableRow key={r.label}>
                           <TableCell className="text-sm">{r.label}</TableCell>
                           <TableCell className="text-sm text-right">{num(r.qty)} {r.unit}</TableCell>
@@ -1322,7 +1363,7 @@ export default function ReportsCenterPage() {
                   disabled={!wastage?.length}
                   onClick={() => exportCsv("wastage-records.csv", [
                     ["Date", "Meal", "Dish / unit", "Wastage", "Unit", "Recorded by", "Recorded at"],
-                    ...(wastage || []).map((row: any) => [
+                    ...visibleWastage.map((row: any) => [
                       row.menu_date, row.meal_period, row.dish, num(row.wasted), row.unit,
                       row.recorded_by, row.recorded_at,
                     ]),
@@ -1334,8 +1375,8 @@ export default function ReportsCenterPage() {
               <CardContent className="p-0">
                 {wastageLoading ? (
                   <p className="p-6 text-center text-sm text-muted-foreground">Wastage load ho raha hai…</p>
-                ) : !wastage?.length ? (
-                  <p className="p-6 text-center text-sm text-muted-foreground">Selected dates mein wastage record nahi hai.</p>
+                ) : visibleWastage.length === 0 ? (
+                  <p className="p-6 text-center text-sm text-muted-foreground">Search ya selected dates mein wastage record nahi hai.</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <Table>
@@ -1349,7 +1390,7 @@ export default function ReportsCenterPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(wastage || []).map((row: any, index: number) => (
+                        {visibleWastage.map((row: any, index: number) => (
                           <TableRow key={`${row.recorded_at}-${index}`}>
                             <TableCell className="whitespace-nowrap text-sm">
                               <b>{row.menu_date}</b>
