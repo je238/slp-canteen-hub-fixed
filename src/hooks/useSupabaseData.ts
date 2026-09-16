@@ -217,29 +217,39 @@ export function useReceiveStockWithoutBill() {
   });
 }
 
-// Attaching late-arriving bill photos is documentary only. The database RPC
-// explicitly returns stock_changed=false and caps one receiving at four bills.
-export function useAttachPurchaseInvoice() {
+// A no-bill receiving carries provisional prices. This finalisation replaces
+// them with the paper bill's rates and records GST/charges, while the database
+// guarantees that physical stock is not received a second time.
+export function useFinalizePurchaseInvoice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ purchase_id, image_path, amount, bill_number, bill_date }: {
+    mutationFn: async (input: {
       purchase_id: string;
-      image_path: string;
-      amount?: number | null;
-      bill_number?: string;
-      bill_date?: string;
+      files: { image_path: string; amount?: number | null; bill_number?: string; bill_date?: string }[];
+      lines: { purchase_item_id: string; rate: number }[];
+      tax_amount: number;
+      other_charges: number;
+      bill_total: number;
     }) => {
-      const { data, error } = await supabase.rpc("attach_purchase_invoice" as any, {
-        p_purchase_id: purchase_id,
-        p_image_path: image_path,
-        p_amount: amount ?? null,
-        p_bill_number: bill_number || null,
-        p_bill_date: bill_date || null,
+      const { data, error } = await supabase.rpc("finalize_pending_purchase_bill" as any, {
+        p_purchase_id: input.purchase_id,
+        p_files: input.files,
+        p_lines: input.lines,
+        p_tax_amount: input.tax_amount,
+        p_other_charges: input.other_charges,
+        p_bill_total: input.bill_total,
       });
       if (error) throw error;
       return data as any;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["purchases"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["ingredients"] });
+      qc.invalidateQueries({ queryKey: ["ingredientRates"] });
+      qc.invalidateQueries({ queryKey: ["storeKeeperDashboard"] });
+      qc.invalidateQueries({ queryKey: ["periodSummary"] });
+      qc.invalidateQueries({ queryKey: ["executiveAlerts"] });
+    },
   });
 }
 

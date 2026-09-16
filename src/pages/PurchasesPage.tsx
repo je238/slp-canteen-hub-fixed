@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   usePurchases, useSuppliers, useAddSupplier, useConfirmPurchase, useIngredients,
-  useReceiveStockWithoutBill, useAttachPurchaseInvoice, useCorrectPurchaseLine,
+  useReceiveStockWithoutBill, useFinalizePurchaseInvoice, useCorrectPurchaseLine,
 } from "@/hooks/useSupabaseData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -228,11 +228,33 @@ interface PendingBillFile {
 }
 
 function LateBillsDialog({ purchase, onClose }: { purchase: any | null; onClose: () => void }) {
-  const attachInvoice = useAttachPurchaseInvoice();
+  const finalizeInvoice = useFinalizePurchaseInvoice();
   const [files, setFiles] = useState<PendingBillFile[]>([]);
+  const [lineRates, setLineRates] = useState<Record<string, string>>({});
+  const [taxAmount, setTaxAmount] = useState("");
+  const [otherCharges, setOtherCharges] = useState("");
+  const [billTotal, setBillTotal] = useState("");
   const [saving, setSaving] = useState(false);
   const existing: any[] = purchase?.purchase_invoice_files || [];
+  const purchaseLines: any[] = purchase?.purchase_items || [];
   const slots = Math.max(0, 4 - existing.length);
+
+  useEffect(() => {
+    if (!purchase) return;
+    setFiles([]);
+    setLineRates(Object.fromEntries(
+      (purchase.purchase_items || []).map((line: any) => [line.id, String(Number(line.rate || 0))]),
+    ));
+    setTaxAmount(Number(purchase.tax_amount || 0) ? String(Number(purchase.tax_amount)) : "");
+    setOtherCharges(Number(purchase.other_charges || 0) ? String(Number(purchase.other_charges)) : "");
+    setBillTotal(purchase.stated_total != null ? String(Number(purchase.stated_total)) : "");
+  }, [purchase?.id]);
+
+  const itemSubtotal = purchaseLines.reduce((sum, line) => {
+    const rate = Number(lineRates[line.id] ?? line.rate ?? 0);
+    return sum + Number(line.quantity || 0) * (Number.isFinite(rate) ? rate : 0);
+  }, 0);
+  const calculatedTotal = itemSubtotal + Number(taxAmount || 0) + Number(otherCharges || 0);
 
   const addFile = (file: File) => {
     if (files.length >= slots) { toast.error("Ek receiving par maximum 4 bill hi lag sakte hain"); return; }
@@ -243,9 +265,29 @@ function LateBillsDialog({ purchase, onClose }: { purchase: any | null; onClose:
     setFiles((prev) => prev.map((row, i) => i === index ? { ...row, ...patch } : row));
 
   const save = async () => {
-    if (!purchase || files.length === 0) { toast.error("Kam se kam ek bill photo lagao"); return; }
+    if (!purchase || (files.length === 0 && existing.length === 0 && !purchase.invoice_image_url)) {
+      toast.error("Kam se kam ek bill photo lagao"); return;
+    }
+    const finalLines = purchaseLines.map((line) => ({
+      purchase_item_id: line.id,
+      rate: Number(lineRates[line.id]),
+    }));
+    if (finalLines.some((line) => !Number.isFinite(line.rate) || line.rate < 0)) {
+      toast.error("Har item ka final bill rate sahi bharo"); return;
+    }
+    if (files.some((row) => row.amount.trim() !== "" && (!Number.isFinite(Number(row.amount)) || Number(row.amount) < 0))) {
+      toast.error("Har attached bill ka amount sahi bharo"); return;
+    }
+    const gst = Number(taxAmount || 0);
+    const extras = Number(otherCharges || 0);
+    const grandTotal = billTotal.trim() === "" ? calculatedTotal : Number(billTotal);
+    if (![gst, extras, grandTotal].every((value) => Number.isFinite(value) && value >= 0)) {
+      toast.error("GST, other charges aur bill total sahi bharo"); return;
+    }
     setSaving(true);
+    const uploadedPaths: string[] = [];
     try {
+      const uploadedFiles: { image_path: string; amount: number | null; bill_number: string; bill_date?: string }[] = [];
       for (let index = 0; index < files.length; index += 1) {
         const row = files[index];
         const small = await compressImage(row.file);
@@ -253,18 +295,32 @@ function LateBillsDialog({ purchase, onClose }: { purchase: any | null; onClose:
         const path = `${purchase.canteen_id}/${purchase.id}/${Date.now()}-${index + 1}-${safe}`;
         const { error } = await supabase.storage.from("invoices").upload(path, small, { contentType: small.type });
         if (error) throw error;
-        await attachInvoice.mutateAsync({
-          purchase_id: purchase.id,
+        uploadedPaths.push(path);
+        uploadedFiles.push({
           image_path: path,
           amount: row.amount.trim() === "" ? null : Number(row.amount),
           bill_number: row.bill_number.trim(),
           bill_date: row.bill_date || undefined,
         });
       }
-      toast.success(`${files.length} bill attach ho gaye — stock dobara add nahi hua`);
+      const result = await finalizeInvoice.mutateAsync({
+        purchase_id: purchase.id,
+        files: uploadedFiles,
+        lines: finalLines,
+        tax_amount: gst,
+        other_charges: extras,
+        bill_total: grandTotal,
+      });
+      toast.success(
+        `${files.length ? `${files.length} bill save hua, ` : ""}${Number(result?.rates_changed || 0)} rate final hue — stock quantity dobara add nahi hui`,
+      );
+      if (result?.mismatch) {
+        toast.warning(`Bill total aur items + GST me ₹${Math.abs(Number(result.mismatch)).toLocaleString("en-IN")} ka difference hai`);
+      }
       setFiles([]);
       onClose();
     } catch (err: any) {
+      if (uploadedPaths.length) await supabase.storage.from("invoices").remove(uploadedPaths);
       toast.error(err.message || "Bill attach nahi hua");
     } finally { setSaving(false); }
   };
@@ -274,8 +330,8 @@ function LateBillsDialog({ purchase, onClose }: { purchase: any | null; onClose:
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Bill baad mein attach karo</DialogTitle></DialogHeader>
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-          Saman pehle hi stock mein aa chuka hai. Yahan bill lagane se stock dobara nahi badhega.
-          Ek receiving par total 4 bill laga sakte ho.
+          Saman pehle hi stock mein aa chuka hai. Ab bill se har item ka final rate aur GST bharo.
+          Stock quantity dobara nahi badhegi; sirf cost final hogi aur purana rate audit me safe rahega.
         </div>
 
         {existing.length > 0 && (
@@ -311,6 +367,31 @@ function LateBillsDialog({ purchase, onClose }: { purchase: any | null; onClose:
           ))}
         </div>
 
+        <div className="space-y-2 rounded-lg border p-3">
+          <p className="text-sm font-semibold">Bill ke final item rates</p>
+          <p className="text-xs text-muted-foreground">Ye provisional/purane rates ko replace karenge.</p>
+          {purchaseLines.map((line) => (
+            <div key={line.id} className="grid grid-cols-[minmax(0,1fr)_8rem] items-end gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-medium">{line.item_name}</p>
+                <p className="text-[10px] text-muted-foreground">{Number(line.quantity)} {line.unit} · provisional ₹{Number(line.rate || 0).toLocaleString("en-IN")}/{line.unit}</p>
+              </div>
+              <div><Label className="text-[10px]">Final ₹/{line.unit}</Label><Input type="number" min="0" step="any" inputMode="decimal" value={lineRates[line.id] ?? ""} onChange={(e) => setLineRates((previous) => ({ ...previous, [line.id]: e.target.value }))} /></div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div><Label className="text-xs">GST amount</Label><Input type="number" min="0" step="any" inputMode="decimal" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} placeholder="₹0" /></div>
+          <div><Label className="text-xs">Other charges</Label><Input type="number" min="0" step="any" inputMode="decimal" value={otherCharges} onChange={(e) => setOtherCharges(e.target.value)} placeholder="freight etc." /></div>
+          <div><Label className="text-xs">Bill grand total</Label><Input type="number" min="0" step="any" inputMode="decimal" value={billTotal} onChange={(e) => setBillTotal(e.target.value)} placeholder={`₹${calculatedTotal.toFixed(2)}`} /></div>
+        </div>
+        <div className="rounded-md bg-slate-50 px-3 py-2 text-xs">
+          Items <b>₹{itemSubtotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</b>
+          {` + GST ₹${Number(taxAmount || 0).toLocaleString("en-IN")} + other ₹${Number(otherCharges || 0).toLocaleString("en-IN")} = `}
+          <b>₹{calculatedTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</b>
+        </div>
+
         {files.length < slots && (
           <FilePickButton onPick={addFile} accept="image/*,application/pdf,.pdf" disabled={saving} className="h-11 px-4 border border-dashed border-accent text-accent">
             <Paperclip className="h-4 w-4" /> Bill photo/PDF lagao ({existing.length + files.length}/4)
@@ -319,8 +400,8 @@ function LateBillsDialog({ purchase, onClose }: { purchase: any | null; onClose:
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>Baad mein</Button>
-          <Button onClick={save} disabled={saving || files.length === 0}>
-            {saving ? "Upload ho raha hai…" : `${files.length || ""} bill save karo`}
+          <Button onClick={save} disabled={saving || finalizeInvoice.isPending}>
+            {saving ? "Bill aur rates save ho rahe hain…" : files.length ? `${files.length} bill aur final rates save karo` : "Bill rates/GST final karo"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -653,9 +734,9 @@ export default function PurchasesPage() {
                     </div>
                     <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
                       {billFiles.length === 0 && <InvoiceImageButton path={p.invoice_image_url} />}
-                      {canManagePurchases && (billPending || billFiles.length < 4) && (
+                      {canManagePurchases && (billPending || !p.bill_finalized_at || billFiles.length < 4) && (
                         <Button size="sm" variant={billPending ? "default" : "outline"} className="w-full justify-center gap-1 text-xs sm:w-auto" onClick={() => setBillPurchase(p)}>
-                          <Paperclip className="h-3.5 w-3.5" /> {billPending ? "Bill aaya — upload" : "Aur bill lagao"}
+                          <Paperclip className="h-3.5 w-3.5" /> {billPending && billFiles.length === 0 && !p.invoice_image_url ? "Bill aaya — upload" : !p.bill_finalized_at ? "Bill rates/GST final karo" : "Aur bill lagao"}
                         </Button>
                       )}
                     </div>
@@ -666,6 +747,14 @@ export default function PurchasesPage() {
                         purchase={p}
                         onCorrect={canManagePurchases ? (line) => setCorrectionTarget({ purchase: p, line }) : undefined}
                       />
+                      {!billPending && (
+                        <div className="mt-2 grid grid-cols-2 gap-2 rounded-md border bg-slate-50 p-3 text-xs sm:grid-cols-4">
+                          <div><p className="text-muted-foreground">Items subtotal</p><p className="font-semibold">₹{Number(p.total_amount || 0).toLocaleString("en-IN")}</p></div>
+                          <div><p className="text-muted-foreground">GST</p><p className="font-semibold">₹{Number(p.tax_amount || 0).toLocaleString("en-IN")}</p></div>
+                          <div><p className="text-muted-foreground">Other charges</p><p className="font-semibold">₹{Number(p.other_charges || 0).toLocaleString("en-IN")}</p></div>
+                          <div><p className="text-muted-foreground">Bill total</p><p className="font-bold">₹{Number(p.stated_total ?? p.total_amount ?? 0).toLocaleString("en-IN")}</p></div>
+                        </div>
+                      )}
                       {billFiles.length > 0 && (
                         <div className="mt-3 border-t pt-3 space-y-1">
                           <p className="text-xs font-semibold">Attached bills ({billFiles.length}/4)</p>

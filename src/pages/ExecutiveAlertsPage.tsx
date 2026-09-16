@@ -67,7 +67,7 @@ export default function ExecutiveAlertsPage(){
       const [fraud,logs,purchases,scans,units,operations]=await Promise.all([
         supabase.from("fraud_alerts").select("*").in("status",["open","reviewed","escalated"]).order("created_at",{ascending:false}).limit(200),
         supabase.from("action_logs").select("id,user_id,action,entity_type,canteen_id,details,created_at").in("action",IMPORTANT_ACTIONS).gte("created_at",from).order("created_at",{ascending:false}).limit(300),
-        supabase.from("purchases").select("id,canteen_id,supplier_id,status,total_amount,stated_total,bill_status,payment_status,invoice_image_url,bill_received_at,approved_at,created_at,created_by,suppliers(name),purchase_items(id,ingredient_id,item_name,quantity,unit,rate,total,matched),purchase_invoice_files(id,image_path,bill_number,bill_date,amount,uploaded_by,created_at),purchase_line_corrections(id,corrected_by,reason,old_values,new_values,created_at)").eq("status","confirmed").gte("created_at",from).order("created_at",{ascending:true}),
+        supabase.from("purchases").select("id,canteen_id,supplier_id,status,total_amount,stated_total,tax_amount,other_charges,bill_status,payment_status,invoice_image_url,bill_received_at,approved_at,created_at,created_by,suppliers(name),purchase_items(id,ingredient_id,item_name,quantity,unit,rate,total,matched),purchase_invoice_files(id,image_path,bill_number,bill_date,amount,uploaded_by,created_at),purchase_line_corrections(id,corrected_by,reason,old_values,new_values,created_at)").eq("status","confirmed").gte("created_at",from).order("created_at",{ascending:true}),
         supabase.from("ocr_scan_events" as any).select("id,canteen_id,status,error_message,duration_ms,created_at,user_id").gte("created_at",sinceIso(7)).order("created_at",{ascending:false}),
         supabase.from("historical_unit_review" as any).select("purchase_item_id,canteen_id,created_at,item_name,bill_unit,master_unit,conversion_confirmed,conversion_note").eq("conversion_confirmed",false),
         supabase.rpc("executive_alert_details" as any,{p_date:todayIso()}),
@@ -229,24 +229,29 @@ export default function ExecutiveAlertsPage(){
     const rateHistory=new Map<string,number[]>();
     for(const p of raw.purchases){
       const lines:any[]=p.purchase_items||[];const lineTotal=lines.reduce((s,l)=>s+Number(l.total||0),0);
-      if(p.stated_total!=null&&Math.abs(Number(p.stated_total)-lineTotal)>1){
+      const gst=Number(p.tax_amount||0);const otherCharges=Number(p.other_charges||0);
+      const calculatedBillTotal=lineTotal+gst+otherCharges;
+      if(p.stated_total!=null&&Math.abs(Number(p.stated_total)-calculatedBillTotal)>1){
         const attachments=purchaseEvidence(p);
         const corrections:any[]=p.purchase_line_corrections||[];
         out.push({
           key:`total-${p.id}`,source:"automatic",siteId:p.canteen_id,site:siteNames[p.canteen_id]||"Site",
           title:"Invoice total aur lines mismatch",description:p.suppliers?.name||"Vendor nahi dala",
           severity:"critical",status:"open",at:p.created_at,
-          oldValue:`Scan / bill total ${money(p.stated_total)}`,newValue:`Confirmed lines ${money(lineTotal)}`,
-          reason:"Bill par likha total aur app me confirmed item lines ka total match nahi hai",
-          person:users[p.created_by]||"Store Keeper",impact:Math.abs(Number(p.stated_total)-lineTotal),to:"/purchases",
+          oldValue:`Scan / bill total ${money(p.stated_total)}`,newValue:`Items + GST/charges ${money(calculatedBillTotal)}`,
+          reason:"Bill par likha total aur app ke final item rates + GST/charges match nahi hain",
+          person:users[p.created_by]||"Store Keeper",impact:Math.abs(Number(p.stated_total)-calculatedBillTotal),to:"/purchases",
           details:[
             {label:"Vendor",value:p.suppliers?.name||"Vendor nahi dala"},
             {label:"Store Keeper entry",value:users[p.created_by]||"User record unavailable"},
             {label:"Purchase kab chadhaya",value:dateTime(p.created_at)},
             {label:"Invoice kab upload hua",value:attachments.length?dateTime(attachments[0].uploadedAt):"Photo attach nahi hai"},
             {label:"Scan / bill me total",value:money(p.stated_total)},
-            {label:"Confirmed lines ka total",value:money(lineTotal)},
-            {label:"Difference",value:money(Math.abs(Number(p.stated_total)-lineTotal))},
+            {label:"Final item lines",value:money(lineTotal)},
+            {label:"GST",value:money(gst)},
+            {label:"Other charges",value:money(otherCharges)},
+            {label:"Items + GST/charges",value:money(calculatedBillTotal)},
+            {label:"Difference",value:money(Math.abs(Number(p.stated_total)-calculatedBillTotal))},
             {label:"Confirmed item lines",value:String(lines.length)},
           ],
           attachments,
