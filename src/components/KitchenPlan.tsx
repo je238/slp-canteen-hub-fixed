@@ -23,7 +23,10 @@ import { toast } from "sonner";
 // Answering once teaches it for good: the same dish on next week's menu
 // arrives with its ingredients already attached.
 
-const UNITS = ["kg", "litre", "pcs", "packet"];
+// Chefs naturally describe spices in grams and liquids in ml.  The save RPC
+// converts these to the inventory item's base unit, so the order always reads
+// in kg/litre without turning 100 gram into 100 kg.
+const UNITS = ["gram", "kg", "ml", "litre", "pcs", "packet"];
 
 interface Props {
   canteenId: string;
@@ -281,6 +284,11 @@ export default function KitchenPlan({ canteenId, date, onAdd, onOrderMeal, onExt
                            p.map((x, i) => i === idx ? { ...x, quantity: e.target.value } : x))} />
                     {Number(l.quantity) > 0 && Number(makes) > 0 ? <p className="text-[10px] text-muted-foreground">
                       {perPerson(Number(l.quantity), l.unit, Number(makes))}
+                      {smallUnitConversion(
+                        l.quantity,
+                        l.unit,
+                        sorted.find((item: any) => item.id === l.ingredient_id)?.unit,
+                      )}
                     </p> : null}
                   </div>
                   <div className="space-y-1">
@@ -318,6 +326,20 @@ function perPerson(quantity: number, unit: string, people: number) {
   if (normalized === "kg") return `Lagbhag ${(each * 1000).toLocaleString("en-IN", { maximumFractionDigits: 1 })} gram per person`;
   if (normalized === "litre" || normalized === "liter") return `Lagbhag ${(each * 1000).toLocaleString("en-IN", { maximumFractionDigits: 1 })} ml per person`;
   return `Lagbhag ${each.toLocaleString("en-IN", { maximumFractionDigits: 3 })} ${unit} per person`;
+}
+
+function smallUnitConversion(quantity: string, unit: string, inventoryUnit?: string) {
+  const value = Number(quantity);
+  if (!(value > 0)) return "";
+  const normalized = String(unit || "").toLowerCase();
+  const target = String(inventoryUnit || "").toLowerCase();
+  if (["g", "gm", "gram", "grams"].includes(normalized)) {
+    return ` · save hoga ${value / 1000} ${target === "litre" || target === "liter" ? inventoryUnit : "kg"}`;
+  }
+  if (["ml", "millilitre", "millilitres", "milliliter", "milliliters"].includes(normalized)) {
+    return ` · save hoga ${value / 1000} litre`;
+  }
+  return "";
 }
 
 function IngredientPicker({ value, ingredients, onChange }: {
