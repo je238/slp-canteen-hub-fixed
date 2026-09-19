@@ -135,6 +135,12 @@ export default function MenuPlanningPage() {
       toast.success(publish ? "Menu published — the chef can see it now" : "Menu saved as draft");
       closeEditor();
     } catch (e: any) {
+      if (e?.code === "MENU_ALREADY_EXISTS") {
+        closeEditor();
+        await qc.invalidateQueries({ queryKey: ["menuPlans"] });
+        toast.info(e.message);
+        return;
+      }
       toast.error(e.message);
     }
   };

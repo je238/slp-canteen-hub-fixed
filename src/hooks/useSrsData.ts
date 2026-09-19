@@ -130,6 +130,31 @@ export function useSaveMenuPlan() {
   return useMutation({
     mutationFn: async ({ id, items, ...fields }: any) => {
       const table = supabase.from("menu_plans" as any);
+      let planId = id as string | undefined;
+
+      // A phone can restore an unsaved local draft after the same meal was
+      // published from another device. The editor then has no id and used to
+      // attempt a second INSERT, leaking the database constraint name into
+      // the UI. Reconcile the natural key before writing. Drafts are safe to
+      // resume; an already-published menu must be opened explicitly so a
+      // stale browser draft can never overwrite the kitchen's live document.
+      if (!planId && fields.canteen_id && fields.menu_date && fields.meal_period) {
+        const { data, error: lookupError } = await table
+          .select("id,status")
+          .eq("canteen_id", fields.canteen_id)
+          .eq("menu_date", fields.menu_date)
+          .eq("meal_period", fields.meal_period)
+          .maybeSingle();
+        if (lookupError) throw lookupError;
+        const existing = data as unknown as { id: string; status: string } | null;
+        if (existing?.status && existing.status !== "draft") {
+          const conflict = new Error("Is date aur meal ka menu pehle se published hai. Existing menu refresh karke dikhaya gaya hai.") as Error & { code?: string };
+          conflict.code = "MENU_ALREADY_EXISTS";
+          throw conflict;
+        }
+        planId = existing?.id;
+      }
+
       const writeItems = async (planId: string) => {
         if (items.length === 0) return;
         const { error } = await supabase
@@ -138,22 +163,27 @@ export function useSaveMenuPlan() {
         if (error) throw error;
       };
 
-      if (id) {
+      if (planId) {
         // Replace the dish list BEFORE touching the plan row. Publishing
         // freezes the dishes, so writing the status first would leave the
         // old lines locked against the very save that is replacing them.
         if (items) {
           const { error: dErr } = await supabase
-            .from("menu_plan_items" as any).delete().eq("menu_plan_id", id);
+            .from("menu_plan_items" as any).delete().eq("menu_plan_id", planId);
           if (dErr) throw dErr;
-          await writeItems(id);
+          await writeItems(planId);
         }
-        const { data, error } = await table.update(fields).eq("id", id).select().single();
+        const { data, error } = await table.update(fields).eq("id", planId).select().single();
         if (error) throw error;
         return data;
       }
 
       const { data, error } = await table.insert(fields).select().single();
+      if (error?.code === "23505") {
+        const conflict = new Error("Is date aur meal ka menu pehle se bana hua hai. Existing menu refresh karke dikhaya gaya hai.") as Error & { code?: string };
+        conflict.code = "MENU_ALREADY_EXISTS";
+        throw conflict;
+      }
       if (error) throw error;
       if (items) await writeItems((data as any).id);   // new plan, nothing to replace
       return data;
