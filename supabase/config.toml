@@ -1,4 +1,4 @@
-project_id = "annkatfpzvgjitomcefo"
+project_id = "djexqeisvrybemkftbxm"
 
 # POST is authenticated by a random, service-role-only per-job webhook token.
 # GET exposes only the public VAPID key used by browser subscription.
