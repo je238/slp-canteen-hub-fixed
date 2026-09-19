@@ -234,22 +234,34 @@ export function useRequisitions(canteenId?: string, status?: string) {
     queryKey: ["requisitions", canteenId, status, REPORTING_CUTOVER_DATE],
     enabled: !!canteenId && canteenId !== "all",
     queryFn: async () => {
-      let q = supabase
-        .from("requisitions" as any)
-        // menu_plans comes along so the card can say which DAY's meal this is.
-        // Without it the only date on screen was created_at — the day somebody
-        // typed the order — and an order raised on the 16th for the 17th's
-        // dinner read as a 16th order. The store keeper issuing four of these
-        // at once had no way to tell them apart.
-        .select("*, menu_plans(menu_date, meal_period, menu_plan_items(dish_name)), requisition_items(*, ingredients:ingredients!requisition_items_ingredient_id_fkey(name, unit, category, current_stock, cost_per_unit), original_ingredient:ingredients!requisition_items_original_ingredient_id_fkey(name, unit))")
-        .eq("canteen_id", canteenId!)
-        .gte("req_date", REPORTING_CUTOVER_DATE)
-        .order("created_at", { ascending: false })
-        .limit(100);
-      if (status) q = q.eq("status", status);
-      const { data, error } = await q;
-      if (error) throw error;
-      return data as any[];
+      // A site can cross 100 requisitions in only a few days. The old hard
+      // limit silently chopped the History tab at the 100th newest order,
+      // even though the older rows were still safe in the database. Fetch in
+      // stable pages so every requisition since reporting cutover is visible.
+      const pageSize = 500;
+      const rows: any[] = [];
+      for (let from = 0; ; from += pageSize) {
+        let q = supabase
+          .from("requisitions" as any)
+          // menu_plans comes along so the card can say which DAY's meal this is.
+          // Without it the only date on screen was created_at — the day somebody
+          // typed the order — and an order raised on the 16th for the 17th's
+          // dinner read as a 16th order. The store keeper issuing four of these
+          // at once had no way to tell them apart.
+          .select("*, menu_plans(menu_date, meal_period, menu_plan_items(dish_name)), requisition_items(*, ingredients:ingredients!requisition_items_ingredient_id_fkey(name, unit, category, current_stock, cost_per_unit), original_ingredient:ingredients!requisition_items_original_ingredient_id_fkey(name, unit))")
+          .eq("canteen_id", canteenId!)
+          .gte("req_date", REPORTING_CUTOVER_DATE);
+        if (status) q = q.eq("status", status);
+        const { data, error } = await q
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        const page = (data || []) as any[];
+        rows.push(...page);
+        if (page.length < pageSize) break;
+      }
+      return rows;
     },
   });
 }
