@@ -124,8 +124,11 @@ const MENU_SCHEMA = {
 };
 
 const MODELS = [
-  { name: "gemini-3.5-flash-lite", timeoutMs: 50_000 },
-  { name: "gemini-3.1-flash-lite", timeoutMs: 20_000 },
+  // Full Flash reads dense printed tables and difficult handwriting much more
+  // reliably than the Lite-only chain that previously returned empty bills.
+  // Lite remains the fast fallback for provider load/rate-limit failures.
+  { name: "gemini-3.5-flash", timeoutMs: 40_000 },
+  { name: "gemini-3.5-flash-lite", timeoutMs: 20_000 },
 ];
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
@@ -351,5 +354,4 @@ serve(async (req) => {
     });
   }
 });
-
 

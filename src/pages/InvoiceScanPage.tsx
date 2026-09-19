@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
-import { useIngredients, useCreatePurchase, useSuppliers } from "@/hooks/useSupabaseData";
+import { useIngredients, useCreatePurchase, useSuppliers, useAddSupplier } from "@/hooks/useSupabaseData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +70,16 @@ const blankInvoiceMeta = (): InvoiceMeta => ({
   other_charges: null,
   grand_total: null,
 });
+
+// "M/S Maa Annapurna Traders Pvt. Ltd." and "Maa Annapurna Traders" are the
+// same vendor. Compare a conservative business-name key before creating a new
+// Vendor Master row, otherwise punctuation on two scans creates duplicates.
+const vendorKey = (value?: string | null) => String(value || "")
+  .normalize("NFKC")
+  .toLocaleLowerCase("en-IN")
+  .replace(/^m\/?s\.?\s+/, "")
+  .replace(/\b(private limited|pvt\.?\s*ltd\.?|limited|ltd\.?)\b/g, "")
+  .replace(/[^\p{L}\p{N}]+/gu, "");
 
 // How many single-letter edits separate two names. Substring matching
 // alone never catches the dangerous case: Rose and Rice share no run of
@@ -141,6 +151,7 @@ export default function InvoiceScanPage() {
   const { selectedCanteen } = useAppContext();
   const { data: ingredients } = useIngredients(selectedCanteen);
   const { data: suppliers } = useSuppliers(selectedCanteen);
+  const addSupplier = useAddSupplier();
   const createPurchase = useCreatePurchase();
   const navigate = useNavigate();
 
@@ -163,7 +174,10 @@ export default function InvoiceScanPage() {
     setCapturedImage(null);
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+        // 720p made a full A4 invoice's small item rows unreadable after the
+        // phone fitted the whole page into the frame. Ask for document-grade
+        // detail; browsers may still choose the best resolution available.
+        video: { facingMode: "environment", width: { ideal: 2560 }, height: { ideal: 1920 } }
       });
       setStream(mediaStream);
       setCameraOpen(true);
@@ -263,12 +277,45 @@ export default function InvoiceScanPage() {
 
   const handleManualFile = useCallback(async (file: File) => {
     try {
-      const { base64, mimeType } = await toCompressedBase64(file);
+      const { base64, mimeType } = await toCompressedBase64(file, 2400);
       beginManualInvoice(file.name, base64, mimeType || "image/jpeg");
     } catch (err: any) {
       toast.error(err.message || "Invoice photo attach nahi hui");
     }
   }, []);
+
+  const matchOrCreateVendor = async (meta: InvoiceMeta | null): Promise<string> => {
+    const name = meta?.vendor_name?.trim() || "";
+    const key = vendorKey(name);
+    if (!name || key.length < 3 || selectedCanteen === "all") return "";
+
+    // Refresh once from the database: the supplier query may still be loading
+    // when a fast scan completes, or another user may just have added it.
+    const { data: fresh } = await supabase
+      .from("suppliers")
+      .select("id,name,canteen_id")
+      .order("created_at", { ascending: false });
+    const pool = (fresh?.length ? fresh : suppliers || []) as any[];
+    const exact = pool.find((vendor) => vendorKey(vendor.name) === key);
+    if (exact) return exact.id;
+
+    // A high-confidence fuzzy hit covers a small OCR spelling slip. The old
+    // 0.5 threshold was too loose for automatically assigning money to a
+    // vendor, so automatic linking uses a deliberately stricter threshold.
+    const close = fuzzyMatch(name, pool);
+    if (close && close.confidence >= 0.85) return close.ingredient_id;
+
+    try {
+      const created = await addSupplier.mutateAsync({ name, canteen_id: selectedCanteen });
+      toast.success(`Naya vendor "${name}" Vendor Master mein add ho gaya`);
+      return (created as any).id;
+    } catch (error: any) {
+      // A vendor-reading problem must never hide otherwise valid invoice
+      // lines. Keep the scan open and let the operator choose manually.
+      toast.warning(`Vendor "${name}" read hua, lekin auto-add nahi hua: ${error?.message || "check manually"}`);
+      return "";
+    }
+  };
 
   const processBase64 = async (name: string, imageBase64: string, mimeType: string) => {
     const scanStartedAt = Date.now();
@@ -326,12 +373,7 @@ export default function InvoiceScanPage() {
     // Header fields + vendor auto-match (older function deployments return no `invoice`)
     const meta: InvoiceMeta | null = data?.invoice || null;
     setInvoiceMeta(meta);
-    if (meta?.vendor_name && suppliers?.length) {
-      const vendorMatch = fuzzyMatch(meta.vendor_name, suppliers);
-      setSupplierId(vendorMatch && vendorMatch.confidence >= 0.5 ? vendorMatch.ingredient_id : "");
-    } else {
-      setSupplierId("");
-    }
+    setSupplierId(await matchOrCreateVendor(meta));
 
     setStep("review");
     logOcrEvent("success");
@@ -360,7 +402,7 @@ export default function InvoiceScanPage() {
     setProcessing(true);
     setScanStage(`Preparing ${file.name || "the bill"}…`);
     try {
-      const { base64, mimeType } = await toCompressedBase64(file);
+      const { base64, mimeType } = await toCompressedBase64(file, 2400);
       setScanStage("Sending it to be read");
       // A gallery photo can arrive with no type at all; scan.ts fills it in.
       await processBase64(file.name, base64, mimeType || (/.pdf$/i.test(file.name) ? "application/pdf" : "image/jpeg"));
@@ -368,7 +410,7 @@ export default function InvoiceScanPage() {
       toast.error(err.message || "Failed to process invoice");
       setProcessing(false);
     }
-  }, [ingredients]);
+  }, [ingredients, suppliers, selectedCanteen]);
 
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -376,14 +418,14 @@ export default function InvoiceScanPage() {
     setProcessing(true);
     setScanStage(`Preparing ${file.name || "the bill"}…`);
     try {
-      const { base64, mimeType } = await toCompressedBase64(file);
+      const { base64, mimeType } = await toCompressedBase64(file, 2400);
       setScanStage("Sending it to be read");
       await processBase64(file.name, base64, mimeType);
     } catch (err: any) {
       toast.error(err.message || "Failed to process invoice");
       setProcessing(false);
     }
-  }, [ingredients]);
+  }, [ingredients, suppliers, selectedCanteen]);
 
   const updateScannedItem = (idx: number, updates: Partial<ScannedItem>) => {
     setScannedItems(prev => prev.map((item, i) => i === idx ? { ...item, ...updates } : item));
@@ -668,7 +710,7 @@ export default function InvoiceScanPage() {
                       </select>
                       {invoiceMeta.vendor_name && !supplierId && (
                         <p className="text-[10px] text-muted-foreground mt-1">
-                          No matching vendor found — add "{invoiceMeta.vendor_name}" on the Vendors page to auto-match next time.
+                          Vendor name read hua, lekin automatic add nahi ho saka — list se choose karein.
                         </p>
                       )}
                     </div>

@@ -35,9 +35,10 @@ export async function compressImage(file: File, maxEdge = MAX_EDGE): Promise<Fil
 
 /** Compress, then hand back the base64 the OCR function expects. */
 export async function toCompressedBase64(
-  file: File
+  file: File,
+  maxEdge = MAX_EDGE,
 ): Promise<{ base64: string; mimeType: string; sizeKb: number }> {
-  const small = await compressImage(file);
+  const small = await compressImage(file, maxEdge);
   const base64: string = await new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve((r.result as string).split(",")[1]);
