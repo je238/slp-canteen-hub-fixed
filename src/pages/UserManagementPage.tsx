@@ -18,6 +18,7 @@ const ROLES = [
   { value: "admin", label: "Admin", desc: "All sites, users and controls", site: false },
   { value: "ops_manager", label: "Operations Manager / GM", desc: "Reports, budgets and site performance", site: true },
   { value: "unit_manager", label: "Unit Manager", desc: "Menu, approval and wastage", site: true },
+  { value: "head_chef", label: "Head Chef", desc: "Requisition verification (±10%)", site: true },
   { value: "chef", label: "Chef", desc: "Production, recipe and requisition", site: true },
   { value: "store_keeper", label: "Store Keeper", desc: "Purchase, inventory and issue", site: true },
   { value: "vendor", label: "Vendor", desc: "Own invoices and bills", site: false, supplier: true },
@@ -147,7 +148,7 @@ export default function UserManagementPage() {
           <div className="space-y-4">
             <div><Label>Email</Label><Input type="email" value={form.email} disabled={editing} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
             <div><div className="flex items-center justify-between"><Label>{editing ? "New password (optional)" : "Temporary password"}</Label><Button type="button" variant="ghost" size="sm" onClick={() => setForm({ ...form, password: makePassword() })}><KeyRound className="mr-1 h-3.5 w-3.5" />Generate</Button></div><Input type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
-            <div><Label>Role</Label><Select value={form.role} onValueChange={(role) => setForm({ ...form, role, canteen_id: "", supplier_id: "" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ROLES.filter((r) => rank > (({ admin: 60, ops_manager: 50, unit_manager: 40, chef: 30, store_keeper: 20, vendor: 10 } as any)[r.value])).map((r) => <SelectItem key={r.value} value={r.value}><span className="font-medium">{r.label}</span> — {r.desc}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label>Role</Label><Select value={form.role} onValueChange={(role) => setForm({ ...form, role, canteen_id: "", supplier_id: "" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ROLES.filter((r) => rank > (({ admin: 60, ops_manager: 50, unit_manager: 40, head_chef: 35, chef: 30, store_keeper: 20, vendor: 10 } as any)[r.value])).map((r) => <SelectItem key={r.value} value={r.value}><span className="font-medium">{r.label}</span> — {r.desc}</SelectItem>)}</SelectContent></Select></div>
             {spec?.site && <div><Label>Assigned site</Label><Select value={form.canteen_id || ""} onValueChange={(canteen_id) => setForm({ ...form, canteen_id })}><SelectTrigger><SelectValue placeholder="Site choose karein" /></SelectTrigger><SelectContent>{(canteens as any[]).map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>}
             {spec?.supplier && <div><Label>Vendor company</Label><Select value={form.supplier_id || ""} onValueChange={(supplier_id) => setForm({ ...form, supplier_id })}><SelectTrigger><SelectValue placeholder="Supplier choose karein" /></SelectTrigger><SelectContent>{(suppliers as any[]).map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent></Select></div>}
           </div>

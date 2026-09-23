@@ -5,3 +5,5 @@ dist
 *.log
 *.tsbuildinfo
 .ocr-backup.ts
+output
+tmp

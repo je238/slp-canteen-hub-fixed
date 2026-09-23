@@ -43,3 +43,5 @@ android/app/build/
 android/build/
 android/.gradle/
 android/app/slp-release.keystore
+
+.env*

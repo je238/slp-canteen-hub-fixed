@@ -3,7 +3,7 @@ import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  useRequisitions, useCreateRequisition, useReviewRequisition, useIssueRequisitionActual,
+  useRequisitions, useCreateRequisition, useReviewRequisition, useHeadChefReviewRequisition, useIssueRequisitionActual,
   useSendRequisitionBack, useClosePendingRequisitionItem, useAdminCorrectRequisition, useCancelRequisition,
   useMenuPlans, useIngredientRates, useSuggestedRequisition, useAvailability, useDailyOperatingSnapshot,
   useMenuWastageContext, useHistoricalIssueReconciliation, useSubmitIssueReconciliation,
@@ -32,6 +32,7 @@ import VoiceReasonInput from "@/components/VoiceReasonInput";
 
 // The approval chain on one screen, shown according to who is looking:
 //   Chef        → raise a requisition against a published menu
+//   Head Chef   → verify every quantity within +/-10%
 //   Unit Mgr    → choose the final item and quantity, then approve it
 //   Store Keeper→ issue the approved requisition (stock moves here)
 // Once approved, the order is locked for managers. Admin correction remains
@@ -53,7 +54,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function RequisitionsPage() {
   const { selectedCanteen } = useAppContext();
-  const { isManagerOrAbove, isChef, canIssueStock, roleData, rank } = useAuth();
+  const { isManagerOrAbove, isHeadChef, isChef, canIssueStock, roleData, rank } = useAuth();
   const canAdminCorrect = rank >= 60;
   const isStoreKeeper = String(roleData.role).toLowerCase() === "store_keeper";
   const [kitchenDate, setKitchenDate] = useState(todayIst());
@@ -76,6 +77,7 @@ export default function RequisitionsPage() {
   const [muted, setMutedState] = useState(isMuted());
   const createReq = useCreateRequisition();
   const reviewReq = useReviewRequisition();
+  const headChefReviewReq = useHeadChefReviewRequisition();
   const issueActual = useIssueRequisitionActual();
   const issueLeavePickup = useIssueLeavePickup();
   const sendBack = useSendRequisitionBack();
@@ -192,7 +194,13 @@ export default function RequisitionsPage() {
     if (da !== db) return da.localeCompare(db);
     return MEAL_ORDER.indexOf(a.meal_period) - MEAL_ORDER.indexOf(b.meal_period);
   };
-  const pending = list.filter((r: any) => r.status === "pending").sort(byService);
+  const allPending = list.filter((r: any) => r.status === "pending").sort(byService);
+  // A Manager sees an order only after the required Head Chef stage. Head
+  // Chef keeps already-forwarded rows visible as read-only proof that the
+  // order reached the next person.
+  const pending = allPending.filter((r: any) => !isManagerOrAbove
+    || !r.head_chef_required
+    || r.head_chef_status === "approved");
   const approvedRaw = list.filter((r: any) => r.status === "approved");
   const done = list.filter((r: any) => ["issued", "rejected", "cancelled"].includes(r.status));
 
@@ -362,7 +370,9 @@ export default function RequisitionsPage() {
     const init: Record<string, string> = {};
     const initIngredients: Record<string, string> = {};
     for (const l of r.requisition_items || []) {
-      init[l.id] = String(l.approved_qty ?? l.requested_qty);
+      init[l.id] = String(isHeadChef
+        ? (l.head_chef_qty ?? l.requested_qty)
+        : (l.approved_qty ?? l.head_chef_qty ?? l.requested_qty));
       initIngredients[l.id] = l.ingredient_id;
     }
     setApproved(init);
@@ -371,7 +381,11 @@ export default function RequisitionsPage() {
 
   const submitReview = async (approve: boolean) => {
     if (!review) return;
-    if (approve && storeLeaveMode && pickupName.trim().length < 2) {
+    if (isHeadChef && !approve && !reviewNotes.trim()) {
+      toast.error("Reject karne ka reason likhna zaroori hai");
+      return;
+    }
+    if (!isHeadChef && approve && storeLeaveMode && pickupName.trim().length < 2) {
       toast.error("Store Keeper chhutti par hai — saman lene wale ka naam likhein");
       return;
     }
@@ -380,39 +394,67 @@ export default function RequisitionsPage() {
       ingredient_id: reviewIngredient[l.id] || l.ingredient_id,
       approved_qty: Number(approved[l.id]),
     }));
+    const headChefLines = (review.requisition_items || []).map((l: any) => ({
+      id: l.id,
+      head_chef_qty: Number(approved[l.id]),
+    }));
+    if (isHeadChef && approve && headChefLines.some((line: any) => {
+      const original = (review.requisition_items || []).find((x: any) => x.id === line.id);
+      const requested = Number(original?.requested_qty || 0);
+      const min = Math.round(requested * 0.9 * 1000) / 1000;
+      const max = Math.round(requested * 1.1 * 1000) / 1000;
+      return !Number.isFinite(line.head_chef_qty) || line.head_chef_qty < min || line.head_chef_qty > max;
+    })) {
+      toast.error("Head Chef quantity Chef ke order se sirf 10% kam ya zyada ho sakti hai");
+      return;
+    }
     if (approve && lines.some((line: any) => !Number.isFinite(line.approved_qty) || line.approved_qty < 0)) {
       toast.error("Har quantity 0 ya usse zyada honi chahiye");
       return;
     }
     const activeIngredientIds = lines.filter((line: any) => line.approved_qty > 0).map((line: any) => line.ingredient_id);
-    if (approve && new Set(activeIngredientIds).size !== activeIngredientIds.length) {
+    if (!isHeadChef && approve && new Set(activeIngredientIds).size !== activeIngredientIds.length) {
       toast.error("Ek hi item order mein do active lines par select nahi ho sakta");
       return;
     }
-    const changed = approve && lines.some((line: any) => {
+    const changed = approve && (isHeadChef ? headChefLines.some((line: any) => {
       const original = (review.requisition_items || []).find((x: any) => x.id === line.id);
+      return Math.abs(line.head_chef_qty - Number(original?.requested_qty || 0)) > 1e-9;
+    }) : lines.some((line: any) => {
+      const original = (review.requisition_items || []).find((x: any) => x.id === line.id);
+      const baseQty = Number(original?.head_chef_qty ?? original?.requested_qty ?? 0);
       return line.ingredient_id !== original?.ingredient_id
-        || Math.abs(line.approved_qty - Number(original?.requested_qty || 0)) > 1e-9;
-    });
+        || Math.abs(line.approved_qty - baseQty) > 1e-9;
+    }));
     if (changed && !reviewNotes.trim()) {
       toast.error("Order change kiya hai, isliye reason likhna zaroori hai");
       return;
     }
     try {
-      if (approve && storeLeaveMode) {
+      if (!isHeadChef && approve && storeLeaveMode) {
         await assignLeavePickup.mutateAsync({ requisitionId: review.id, pickupName: pickupName.trim() });
       }
-      await reviewReq.mutateAsync({
-        id: review.id,
-        approve,
-        review_notes: reviewNotes,
-        lines: approve ? lines : [],
-      });
-      toast.success(approve
-        ? (lines.every((line: any) => line.approved_qty === 0)
-          ? "Pura order cancel ho gaya"
-          : storeLeaveMode ? `Approved — ${pickupName.trim()} ko self-pickup assign hua` : "Approved — the store keeper can issue it now")
-        : "Sent back / rejected");
+      if (isHeadChef) {
+        await headChefReviewReq.mutateAsync({
+          id: review.id,
+          approve,
+          review_notes: reviewNotes,
+          lines: approve ? headChefLines : [],
+        });
+        toast.success(approve ? "Verified — order Manager ke paas chala gaya" : "Order reject ho gaya");
+      } else {
+        await reviewReq.mutateAsync({
+          id: review.id,
+          approve,
+          review_notes: reviewNotes,
+          lines: approve ? lines : [],
+        });
+        toast.success(approve
+          ? (lines.every((line: any) => line.approved_qty === 0)
+            ? "Pura order cancel ho gaya"
+            : storeLeaveMode ? `Approved — ${pickupName.trim()} ko self-pickup assign hua` : "Approved — the store keeper can issue it now")
+          : "Sent back / rejected");
+      }
       setReview(null);
     } catch (e: any) {
       toast.error(e.message);
@@ -740,10 +782,13 @@ export default function RequisitionsPage() {
           <div className="flex items-center gap-2">
             <Badge variant="outline" className={`text-[10px] uppercase ${STATUS_STYLE[r.status] || ""}`}>
               {isChef
-                ? (r.status === "pending" ? "MANAGER KE PAAS"
+                ? (r.status === "pending"
+                  ? (r.head_chef_required && r.head_chef_status !== "approved" ? "HEAD CHEF KE PAAS" : "MANAGER KE PAAS")
                   : r.status === "approved" ? (storeLeaveMode ? "SELF PICKUP READY" : "STORE PROCESSING")
                   : r.status === "issued" ? "ISSUE COMPLETE"
                   : r.status === "rejected" ? "MANA HUA" : r.status)
+                : isHeadChef && r.status === "pending"
+                  ? (r.head_chef_status === "approved" ? "MANAGER KE PAAS" : "VERIFY KARNA HAI")
                 : (r.status === "approved" && hasIssuedAnything(r) ? "PARTIALLY ISSUED" : r.status)}
             </Badge>
             {action}
@@ -963,7 +1008,7 @@ export default function RequisitionsPage() {
               <div className="space-y-3">
                 <div>
                   <p className="text-lg font-bold">Saman mangao</p>
-                  <p className="text-sm text-muted-foreground">1. Menu chuno &nbsp; 2. Quantity bharo &nbsp; 3. Manager ko bhejo</p>
+                  <p className="text-sm text-muted-foreground">1. Menu chuno &nbsp; 2. Quantity bharo &nbsp; 3. Head Chef ko bhejo</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Button className="h-14 text-base" onClick={() => { setChefExtraMode(false); setExtraReason(""); setNewOpen(true); }} disabled={selectedCanteen === "all"}>
@@ -976,13 +1021,13 @@ export default function RequisitionsPage() {
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Chef order bhejta hai → Manager approval se pehle final item aur quantity set karta hai → Store Keeper approved order issue karta hai, tab stock move hota hai.
+                Chef order bhejta hai → Head Chef quantity ko ±10% ke andar verify karta hai → Manager final approval deta hai → Store Keeper actual quantity issue karta hai.
               </p>
             )}
           </CardContent>
         </Card>
 
-        {selectedCanteen !== "all" && (storeLeaveMode || isManagerOrAbove || isStoreKeeper) && (
+        {selectedCanteen !== "all" && (isManagerOrAbove || isStoreKeeper || (storeLeaveMode && isChef)) && (
           <Card className={`order-1 shadow-sm ${storeLeaveMode ? "border-warning/50 bg-warning/5" : "border-success/30 bg-success/5"}`}>
             <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-3">
@@ -1083,7 +1128,7 @@ export default function RequisitionsPage() {
           </div>
         )}
 
-        {selectedCanteen !== "all" && (
+        {selectedCanteen !== "all" && !isHeadChef && (
           <div className="order-2">
             <PendingReturns canteenId={selectedCanteen} />
           </div>
@@ -1094,7 +1139,7 @@ export default function RequisitionsPage() {
         ) : (
           <Tabs defaultValue="pending" className="order-2">
             <TabsList className="w-full sm:w-auto">
-              <TabsTrigger value="pending">{isChef ? "Manager ke paas" : "Awaiting approval"} ({pending.length})</TabsTrigger>
+              <TabsTrigger value="pending">{isChef ? "Approval mein" : isHeadChef ? "Verify requisitions" : "Awaiting approval"} ({pending.length})</TabsTrigger>
               <TabsTrigger value="approved">{isChef ? "Store se lena" : "Ready to issue"} ({approvedList.length})</TabsTrigger>
               <TabsTrigger value="history">{isChef ? "Purane orders" : "History"} ({done.length})</TabsTrigger>
               {canIssueStock && !isChef && <TabsTrigger value="actual-check">20 Aug actual check</TabsTrigger>}
@@ -1125,7 +1170,13 @@ export default function RequisitionsPage() {
             <TabsContent value="pending" className="mt-3 space-y-3">
               {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> :
                renderDateGroupedRequisitions(pending, "pending", "Nothing waiting for approval.", (r: any) =>
-                  isManagerOrAbove ? (
+                  isHeadChef ? (
+                    r.head_chef_required && r.head_chef_status !== "approved" ? (
+                      <Button size="sm" onClick={() => openReview(r)}>
+                        <ClipboardList className="mr-1.5 h-4 w-4" /> Verify ±10%
+                      </Button>
+                    ) : <span className="text-xs text-muted-foreground">Manager approval pending</span>
+                  ) : isManagerOrAbove ? (
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button size="sm" variant="outline" className="text-destructive"
                               onClick={() => cancelWholeOrder(r)} disabled={cancelReq.isPending}>
@@ -1811,28 +1862,31 @@ export default function RequisitionsPage() {
               <Button className="h-11 flex-1 sm:flex-none" onClick={submitNew}
                 disabled={createReq.isPending || ((alreadyIssued || chefExtraMode) && !extraReason.trim())}>
                 <Send className="w-4 h-4 mr-1.5" />
-                {(alreadyIssued || chefExtraMode) ? "Extra saman bhejo" : "Manager ko bhejo"}
+                {(alreadyIssued || chefExtraMode) ? "Extra saman bhejo" : "Head Chef ko bhejo"}
               </Button>
             </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ---- Manager full edit before approval ---- */}
+      {/* ---- Head Chef verification, then Manager full edit ---- */}
       <Dialog open={!!review} onOpenChange={(o) => { if (!o) setReview(null); }}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Review REQ-{review?.req_no}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{isHeadChef ? "Head Chef verification" : "Manager review"} · REQ-{review?.req_no}</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground">
-            Approval se pehle Manager final item aur quantity decide karega. Quantity koi bhi rakh sakte hain;
-            <b> 0</b> karne par woh line cancel hogi. Chef ka original order history mein safe rahega.
+            {isHeadChef
+              ? "Har item ki quantity verify karein. Chef ke order se maximum 10% kam ya 10% zyada kar sakte hain; item change nahi hoga."
+              : "Head Chef verified order ke baad Manager final item aur quantity decide karega. Quantity 0 karne par woh line cancel hogi. Chef aur Head Chef dono ki history safe rahegi."}
           </p>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="text-xs">Chef request</TableHead>
                 <TableHead className="text-xs text-right">Qty</TableHead>
-                <TableHead className="text-xs">Manager final item</TableHead>
-                <TableHead className="text-xs text-right">Final qty</TableHead>
+                {!isHeadChef && review?.head_chef_required && <TableHead className="text-xs text-right">Head Chef qty</TableHead>}
+                {!isHeadChef && <TableHead className="text-xs">Manager final item</TableHead>}
+                <TableHead className="text-xs text-right">{isHeadChef ? "Verified qty" : "Final qty"}</TableHead>
+                {isHeadChef && <TableHead className="text-xs text-right">Allowed range</TableHead>}
                 <TableHead className="text-xs text-right">Stock</TableHead>
               </TableRow>
             </TableHeader>
@@ -1850,7 +1904,12 @@ export default function RequisitionsPage() {
                   <TableRow key={l.id} className={take === 0 ? "bg-muted/40" : ""}>
                     <TableCell className="text-sm">{l.ingredients?.name}</TableCell>
                     <TableCell className="text-sm text-right">{req} {l.unit}</TableCell>
-                    <TableCell className="min-w-52">
+                    {!isHeadChef && review?.head_chef_required && (
+                      <TableCell className="text-sm text-right font-semibold">
+                        {Number(l.head_chef_qty ?? l.requested_qty)} {l.unit}
+                      </TableCell>
+                    )}
+                    {!isHeadChef && <TableCell className="min-w-52">
                       <Select value={selectedIngredientId}
                         onValueChange={(value) => setReviewIngredient((prev) => ({ ...prev, [l.id]: value }))}>
                         <SelectTrigger className="h-9"><SelectValue placeholder="Item chuno" /></SelectTrigger>
@@ -1860,15 +1919,23 @@ export default function RequisitionsPage() {
                           ))}
                         </SelectContent>
                       </Select>
-                    </TableCell>
+                    </TableCell>}
                     <TableCell className="text-right">
                       <Input
-                        type="number" min="0" step="any" className="w-24 h-9 text-right ml-auto"
+                        type="number"
+                        min={isHeadChef ? Math.round(req * 0.9 * 1000) / 1000 : 0}
+                        max={isHeadChef ? Math.round(req * 1.1 * 1000) / 1000 : undefined}
+                        step="any" className="w-24 h-9 text-right ml-auto"
                         value={approved[l.id] ?? ""}
                         onChange={(e) => setApproved((p) => ({ ...p, [l.id]: e.target.value }))}
                       />
                       <span className="text-[10px] text-muted-foreground">{finalUnit}</span>
                     </TableCell>
+                    {isHeadChef && (
+                      <TableCell className="text-xs text-right text-muted-foreground">
+                        {Math.round(req * 0.9 * 1000) / 1000} - {Math.round(req * 1.1 * 1000) / 1000} {l.unit}
+                      </TableCell>
+                    )}
                     <TableCell className="text-sm text-right">
                       <span className="text-muted-foreground">{have} {finalUnit}</span>
                       {take > 0 && (left < 0
@@ -1900,7 +1967,7 @@ export default function RequisitionsPage() {
             </div>
           )}
 
-          {storeLeaveMode && (
+          {!isHeadChef && storeLeaveMode && (
             <div className="rounded-md border border-warning/40 bg-warning/5 p-3 space-y-1.5">
               <Label htmlFor="leave-pickup-name">Saman lene wale kitchen person ka naam *</Label>
               <Input id="leave-pickup-name" value={pickupName}
@@ -1913,15 +1980,18 @@ export default function RequisitionsPage() {
           )}
 
           <VoiceReasonInput value={reviewNotes} onChange={setReviewNotes}
-            label="Review note" placeholder="Order change kiya ho to reason zaroor likhein" />
+            label={isHeadChef ? "Verification note" : "Review note"}
+            placeholder="Quantity change ki ho to reason zaroor likhein" />
           <DialogFooter className="items-center sm:justify-between gap-3">
-            <Button variant="destructive" onClick={() => review && cancelWholeOrder(review)} disabled={cancelReq.isPending}>
-              <Trash2 className="mr-1.5 h-4 w-4" /> Pura order cancel
-            </Button>
+            {!isHeadChef ? (
+              <Button variant="destructive" onClick={() => review && cancelWholeOrder(review)} disabled={cancelReq.isPending}>
+                <Trash2 className="mr-1.5 h-4 w-4" /> Pura order cancel
+              </Button>
+            ) : <span className="text-xs text-muted-foreground">Item badalna ya order cancel karna Manager ka control hai.</span>}
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => submitReview(false)} disabled={reviewReq.isPending || assignLeavePickup.isPending}>Reject</Button>
-              <Button onClick={() => submitReview(true)} disabled={reviewReq.isPending || assignLeavePickup.isPending || (storeLeaveMode && pickupName.trim().length < 2)}>
-                <ClipboardList className="w-4 h-4 mr-1.5" /> Approve
+              <Button variant="outline" onClick={() => submitReview(false)} disabled={reviewReq.isPending || headChefReviewReq.isPending || assignLeavePickup.isPending}>Reject</Button>
+              <Button onClick={() => submitReview(true)} disabled={reviewReq.isPending || headChefReviewReq.isPending || assignLeavePickup.isPending || (!isHeadChef && storeLeaveMode && pickupName.trim().length < 2)}>
+                <ClipboardList className="w-4 h-4 mr-1.5" /> {isHeadChef ? "Manager ko bhejo" : "Approve"}
               </Button>
             </div>
           </DialogFooter>

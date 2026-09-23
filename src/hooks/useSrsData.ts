@@ -347,6 +347,34 @@ export function useReviewRequisition() {
   });
 }
 
+// The Head Chef verifies the Chef's quantities before the Manager sees the
+// order. The database enforces the +/-10% band and keeps this quantity as a
+// separate audit stage from both the Chef request and Manager final quantity.
+export function useHeadChefReviewRequisition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, lines, approve, review_notes }: {
+      id: string;
+      lines: { id: string; head_chef_qty: number }[];
+      approve: boolean;
+      review_notes?: string;
+    }) => {
+      const { data, error } = await supabase.rpc("head_chef_review_requisition" as any, {
+        p_req_id: id,
+        p_lines: lines,
+        p_approve: approve,
+        p_review_notes: review_notes?.trim() || null,
+      });
+      if (error) throw error;
+      return data as any;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["requisitions"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+}
+
 export function useIssueRequisition() {
   const qc = useQueryClient();
   return useMutation({

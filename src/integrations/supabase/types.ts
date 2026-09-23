@@ -1658,6 +1658,7 @@ export type Database = {
           amount: number | null
           approved_qty: number | null
           created_at: string
+          head_chef_qty: number | null
           id: string
           ingredient_id: string
           issued_qty: number | null
@@ -1671,6 +1672,7 @@ export type Database = {
           amount?: number | null
           approved_qty?: number | null
           created_at?: string
+          head_chef_qty?: number | null
           id?: string
           ingredient_id: string
           issued_qty?: number | null
@@ -1684,6 +1686,7 @@ export type Database = {
           amount?: number | null
           approved_qty?: number | null
           created_at?: string
+          head_chef_qty?: number | null
           id?: string
           ingredient_id?: string
           issued_qty?: number | null
@@ -1722,6 +1725,11 @@ export type Database = {
           canteen_id: string
           created_at: string
           expected_headcount: number | null
+          head_chef_notes: string | null
+          head_chef_required: boolean
+          head_chef_reviewed_at: string | null
+          head_chef_reviewed_by: string | null
+          head_chef_status: string
           id: string
           issued_at: string | null
           issued_by: string | null
@@ -1740,6 +1748,11 @@ export type Database = {
           canteen_id: string
           created_at?: string
           expected_headcount?: number | null
+          head_chef_notes?: string | null
+          head_chef_required?: boolean
+          head_chef_reviewed_at?: string | null
+          head_chef_reviewed_by?: string | null
+          head_chef_status?: string
           id?: string
           issued_at?: string | null
           issued_by?: string | null
@@ -1758,6 +1771,11 @@ export type Database = {
           canteen_id?: string
           created_at?: string
           expected_headcount?: number | null
+          head_chef_notes?: string | null
+          head_chef_required?: boolean
+          head_chef_reviewed_at?: string | null
+          head_chef_reviewed_by?: string | null
+          head_chef_status?: string
           id?: string
           issued_at?: string | null
           issued_by?: string | null
@@ -2409,6 +2427,7 @@ export type Database = {
       get_qr_order: { Args: { p_order_id: string }; Returns: Json }
       is_admin_editor: { Args: never; Returns: boolean }
       is_chef: { Args: never; Returns: boolean }
+      is_head_chef: { Args: never; Returns: boolean }
       is_manager_or_above: { Args: never; Returns: boolean }
       is_owner: { Args: never; Returns: boolean }
       is_store_keeper: { Args: never; Returns: boolean }

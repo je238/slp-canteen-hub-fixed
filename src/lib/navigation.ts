@@ -33,7 +33,7 @@ export interface NavEntry {
 }
 
 const EVERYONE_INSIDE = [
-  "chef", "cashier", "store_keeper", "unit_manager", "manager",
+  "chef", "cashier", "head_chef", "store_keeper", "unit_manager", "manager",
   "ops_manager", "admin", "super_admin", "owner",
 ];
 const MANAGER_UP = ["unit_manager", "manager", "ops_manager", "admin", "super_admin", "owner"];
@@ -117,6 +117,7 @@ export function canOpen(path: string, role?: string | null): boolean {
 export function homeFor(role?: string | null): string {
   const r = norm(role);
   if (r === "vendor") return "/vendor-portal";
+  if (r === "head_chef") return "/requisitions";
   if (["chef", "cashier"].includes(r)) return "/menu-planning";
   const allowed = navFor(r);
   if (["ops_manager", "admin", "super_admin", "owner"].includes(r)) return "/dashboard";

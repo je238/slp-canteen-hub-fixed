@@ -23,6 +23,8 @@ const LABELS: Record<string, string> = {
   admin_corrected_requisition: "Admin ne order correct kiya",
   requisition_cancelled: "Order cancel hua",
   requisition_sent_back: "Order chef ko wapas bheja",
+  head_chef_reviewed_requisition: "Head Chef ne order verify kiya",
+  head_chef_rejected_requisition: "Head Chef ne order reject kiya",
   stock_adjusted: "Stock physical count se correct hua",
   rate_corrected: "Item rate correct hua",
   ingredient_renamed: "Item ka naam badla",
