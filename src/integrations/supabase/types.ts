@@ -1659,6 +1659,7 @@ export type Database = {
           approved_qty: number | null
           created_at: string
           head_chef_qty: number | null
+          head_chef_ingredient_id: string | null
           id: string
           ingredient_id: string
           issued_qty: number | null
@@ -1673,6 +1674,7 @@ export type Database = {
           approved_qty?: number | null
           created_at?: string
           head_chef_qty?: number | null
+          head_chef_ingredient_id?: string | null
           id?: string
           ingredient_id: string
           issued_qty?: number | null
@@ -1687,6 +1689,7 @@ export type Database = {
           approved_qty?: number | null
           created_at?: string
           head_chef_qty?: number | null
+          head_chef_ingredient_id?: string | null
           id?: string
           ingredient_id?: string
           issued_qty?: number | null

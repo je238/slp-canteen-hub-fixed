@@ -19,7 +19,7 @@ const ROLES = [
   { value: "ops_manager", label: "Operations Manager / GM", desc: "Reports, budgets and site performance", site: true },
   { value: "unit_manager", label: "Unit Manager", desc: "Final order approval and HS entry correction", site: true },
   { value: "head_supervisor", label: "Head Supervisor (HS)", desc: "Menu, plate count and wastage data entry", site: true },
-  { value: "head_chef", label: "Head Chef", desc: "Requisition verification (±10%)", site: true },
+  { value: "head_chef", label: "Head Chef", desc: "Requisition ka full item aur quantity review", site: true },
   { value: "chef", label: "Chef", desc: "Production, recipe and requisition", site: true },
   { value: "store_keeper", label: "Store Keeper", desc: "Purchase, inventory and issue", site: true },
   { value: "vendor", label: "Vendor", desc: "Own invoices and bills", site: false, supplier: true },

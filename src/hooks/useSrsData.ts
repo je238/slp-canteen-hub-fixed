@@ -292,7 +292,7 @@ export function useRequisitions(canteenId?: string, status?: string) {
           // typed the order — and an order raised on the 16th for the 17th's
           // dinner read as a 16th order. The store keeper issuing four of these
           // at once had no way to tell them apart.
-          .select("*, menu_plans(menu_date, meal_period, menu_plan_items(dish_name)), requisition_items(*, ingredients:ingredients!requisition_items_ingredient_id_fkey(name, unit, category, current_stock, cost_per_unit), original_ingredient:ingredients!requisition_items_original_ingredient_id_fkey(name, unit))")
+          .select("*, menu_plans(menu_date, meal_period, menu_plan_items(dish_name)), requisition_items(*, ingredients:ingredients!requisition_items_ingredient_id_fkey(name, unit, category, current_stock, cost_per_unit), head_chef_ingredient:ingredients!requisition_items_head_chef_ingredient_id_fkey(name, unit, category, current_stock, cost_per_unit), original_ingredient:ingredients!requisition_items_original_ingredient_id_fkey(name, unit))")
           .eq("canteen_id", canteenId!)
           .gte("req_date", REPORTING_CUTOVER_DATE);
         if (status) q = q.eq("status", status);
@@ -361,15 +361,15 @@ export function useReviewRequisition() {
   });
 }
 
-// The Head Chef verifies the Chef's quantities before the Manager sees the
-// order. The database enforces the +/-10% band and keeps this quantity as a
-// separate audit stage from both the Chef request and Manager final quantity.
+// The Head Chef can fully edit the Chef's item and quantity before the Manager
+// sees the order. Both choices stay in separate audit fields, so neither the
+// Chef's request nor the Manager's final decision is overwritten.
 export function useHeadChefReviewRequisition() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, lines, approve, review_notes }: {
       id: string;
-      lines: { id: string; head_chef_qty: number }[];
+      lines: { id: string; ingredient_id: string; head_chef_qty: number }[];
       approve: boolean;
       review_notes?: string;
     }) => {

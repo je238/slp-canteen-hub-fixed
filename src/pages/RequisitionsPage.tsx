@@ -32,7 +32,7 @@ import VoiceReasonInput from "@/components/VoiceReasonInput";
 
 // The approval chain on one screen, shown according to who is looking:
 //   Chef        → raise a requisition against a published menu
-//   Head Chef   → verify every quantity within +/-10%
+//   Head Chef   → fully edit item/quantity and forward it
 //   Unit Mgr    → choose the final item and quantity, then approve it
 //   Store Keeper→ issue the approved requisition (stock moves here)
 // Once approved, the order is locked for managers. Admin correction remains
@@ -347,8 +347,8 @@ export default function RequisitionsPage() {
         sayShortageSummary(shortLines.map((i: any) => ({ name: i.name, short: i.q - i.free, unit: i.unit })));
       }
       toast.success((alreadyIssued || chefExtraMode)
-        ? "Top-up sent — the manager sees it as urgent"
-        : "Requisition sent to the manager for approval");
+        ? "Top-up urgent review ke liye bhej diya"
+        : "Requisition Head Chef ko review ke liye bhej diya");
       setNewOpen(false); setChefExtraMode(false); setQty({}); setNotes(""); setExtraReason("");
     } catch (e: any) { toast.error(e.message); }
   };
@@ -373,7 +373,9 @@ export default function RequisitionsPage() {
       init[l.id] = String(isHeadChef
         ? (l.head_chef_qty ?? l.requested_qty)
         : (l.approved_qty ?? l.head_chef_qty ?? l.requested_qty));
-      initIngredients[l.id] = l.ingredient_id;
+      initIngredients[l.id] = isHeadChef
+        ? l.ingredient_id
+        : (l.head_chef_ingredient_id || l.ingredient_id);
     }
     setApproved(init);
     setReviewIngredient(initIngredients);
@@ -396,34 +398,27 @@ export default function RequisitionsPage() {
     }));
     const headChefLines = (review.requisition_items || []).map((l: any) => ({
       id: l.id,
+      ingredient_id: reviewIngredient[l.id] || l.ingredient_id,
       head_chef_qty: Number(approved[l.id]),
     }));
-    if (isHeadChef && approve && headChefLines.some((line: any) => {
-      const original = (review.requisition_items || []).find((x: any) => x.id === line.id);
-      const requested = Number(original?.requested_qty || 0);
-      const min = Math.round(requested * 0.9 * 1000) / 1000;
-      const max = Math.round(requested * 1.1 * 1000) / 1000;
-      return !Number.isFinite(line.head_chef_qty) || line.head_chef_qty < min || line.head_chef_qty > max;
-    })) {
-      toast.error("Head Chef quantity Chef ke order se sirf 10% kam ya zyada ho sakti hai");
-      return;
-    }
     if (approve && lines.some((line: any) => !Number.isFinite(line.approved_qty) || line.approved_qty < 0)) {
       toast.error("Har quantity 0 ya usse zyada honi chahiye");
       return;
     }
     const activeIngredientIds = lines.filter((line: any) => line.approved_qty > 0).map((line: any) => line.ingredient_id);
-    if (!isHeadChef && approve && new Set(activeIngredientIds).size !== activeIngredientIds.length) {
+    if (approve && new Set(activeIngredientIds).size !== activeIngredientIds.length) {
       toast.error("Ek hi item order mein do active lines par select nahi ho sakta");
       return;
     }
     const changed = approve && (isHeadChef ? headChefLines.some((line: any) => {
       const original = (review.requisition_items || []).find((x: any) => x.id === line.id);
-      return Math.abs(line.head_chef_qty - Number(original?.requested_qty || 0)) > 1e-9;
+      return line.ingredient_id !== original?.ingredient_id
+        || Math.abs(line.head_chef_qty - Number(original?.requested_qty || 0)) > 1e-9;
     }) : lines.some((line: any) => {
       const original = (review.requisition_items || []).find((x: any) => x.id === line.id);
       const baseQty = Number(original?.head_chef_qty ?? original?.requested_qty ?? 0);
-      return line.ingredient_id !== original?.ingredient_id
+      const baseIngredientId = original?.head_chef_ingredient_id || original?.ingredient_id;
+      return line.ingredient_id !== baseIngredientId
         || Math.abs(line.approved_qty - baseQty) > 1e-9;
     }));
     if (changed && !reviewNotes.trim()) {
@@ -1021,7 +1016,7 @@ export default function RequisitionsPage() {
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Chef order bhejta hai → Head Chef quantity ko ±10% ke andar verify karta hai → Manager final approval deta hai → Store Keeper actual quantity issue karta hai.
+                Chef order bhejta hai → Head Chef item aur quantity full edit karke approve karta hai → Manager final approval deta hai → Store Keeper actual quantity issue karta hai.
               </p>
             )}
           </CardContent>
@@ -1173,7 +1168,7 @@ export default function RequisitionsPage() {
                   isHeadChef ? (
                     r.head_chef_required && r.head_chef_status !== "approved" ? (
                       <Button size="sm" onClick={() => openReview(r)}>
-                        <ClipboardList className="mr-1.5 h-4 w-4" /> Verify ±10%
+                        <ClipboardList className="mr-1.5 h-4 w-4" /> Full review
                       </Button>
                     ) : <span className="text-xs text-muted-foreground">Manager approval pending</span>
                   ) : isManagerOrAbove ? (
@@ -1872,22 +1867,23 @@ export default function RequisitionsPage() {
       {/* ---- Head Chef verification, then Manager full edit ---- */}
       <Dialog open={!!review} onOpenChange={(o) => { if (!o) setReview(null); }}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{isHeadChef ? "Head Chef verification" : "Manager review"} · REQ-{review?.req_no}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{isHeadChef ? "Head Chef full review" : "Manager review"} · REQ-{review?.req_no}</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground">
             {isHeadChef
-              ? "Har item ki quantity verify karein. Chef ke order se maximum 10% kam ya 10% zyada kar sakte hain; item change nahi hoga."
-              : "Head Chef verified order ke baad Manager final item aur quantity decide karega. Quantity 0 karne par woh line cancel hogi. Chef aur Head Chef dono ki history safe rahegi."}
+              ? "Har item aur quantity poori tarah edit kar sakte hain. Quantity 0 karne par woh line cancel maani jayegi. Chef ka original order audit me safe rahega."
+              : "Head Chef reviewed order ke baad Manager final item aur quantity decide karega. Quantity 0 karne par woh line cancel hogi. Chef aur Head Chef dono ki history safe rahegi."}
           </p>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="text-xs">Chef request</TableHead>
                 <TableHead className="text-xs text-right">Qty</TableHead>
+                {!isHeadChef && review?.head_chef_required && <TableHead className="text-xs">Head Chef item</TableHead>}
                 {!isHeadChef && review?.head_chef_required && <TableHead className="text-xs text-right">Head Chef qty</TableHead>}
-                {!isHeadChef && <TableHead className="text-xs">Manager final item</TableHead>}
-                <TableHead className="text-xs text-right">{isHeadChef ? "Verified qty" : "Final qty"}</TableHead>
-                {isHeadChef && <TableHead className="text-xs text-right">Allowed range</TableHead>}
+                <TableHead className="text-xs">{isHeadChef ? "Head Chef item" : "Manager final item"}</TableHead>
+                <TableHead className="text-xs text-right">{isHeadChef ? "Head Chef qty" : "Final qty"}</TableHead>
                 <TableHead className="text-xs text-right">Stock</TableHead>
+                <TableHead className="text-xs text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1905,11 +1901,16 @@ export default function RequisitionsPage() {
                     <TableCell className="text-sm">{l.ingredients?.name}</TableCell>
                     <TableCell className="text-sm text-right">{req} {l.unit}</TableCell>
                     {!isHeadChef && review?.head_chef_required && (
-                      <TableCell className="text-sm text-right font-semibold">
-                        {Number(l.head_chef_qty ?? l.requested_qty)} {l.unit}
+                      <TableCell className="text-sm font-semibold">
+                        {l.head_chef_ingredient?.name || l.ingredients?.name}
                       </TableCell>
                     )}
-                    {!isHeadChef && <TableCell className="min-w-52">
+                    {!isHeadChef && review?.head_chef_required && (
+                      <TableCell className="text-sm text-right font-semibold">
+                        {Number(l.head_chef_qty ?? l.requested_qty)} {l.head_chef_ingredient?.unit || l.unit}
+                      </TableCell>
+                    )}
+                    <TableCell className="min-w-52">
                       <Select value={selectedIngredientId}
                         onValueChange={(value) => setReviewIngredient((prev) => ({ ...prev, [l.id]: value }))}>
                         <SelectTrigger className="h-9"><SelectValue placeholder="Item chuno" /></SelectTrigger>
@@ -1919,28 +1920,29 @@ export default function RequisitionsPage() {
                           ))}
                         </SelectContent>
                       </Select>
-                    </TableCell>}
+                    </TableCell>
                     <TableCell className="text-right">
                       <Input
                         type="number"
-                        min={isHeadChef ? Math.round(req * 0.9 * 1000) / 1000 : 0}
-                        max={isHeadChef ? Math.round(req * 1.1 * 1000) / 1000 : undefined}
+                        min={0}
                         step="any" className="w-24 h-9 text-right ml-auto"
                         value={approved[l.id] ?? ""}
                         onChange={(e) => setApproved((p) => ({ ...p, [l.id]: e.target.value }))}
                       />
                       <span className="text-[10px] text-muted-foreground">{finalUnit}</span>
                     </TableCell>
-                    {isHeadChef && (
-                      <TableCell className="text-xs text-right text-muted-foreground">
-                        {Math.round(req * 0.9 * 1000) / 1000} - {Math.round(req * 1.1 * 1000) / 1000} {l.unit}
-                      </TableCell>
-                    )}
                     <TableCell className="text-sm text-right">
                       <span className="text-muted-foreground">{have} {finalUnit}</span>
                       {take > 0 && (left < 0
                         ? <span className="block text-[11px] font-semibold text-destructive">{Math.abs(left)} {finalUnit} short</span>
                         : <span className="block text-[11px] text-muted-foreground">{left} left after</span>)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button type="button" variant="ghost" size="sm"
+                        className="text-destructive"
+                        onClick={() => setApproved((prev) => ({ ...prev, [l.id]: "0" }))}>
+                        <Trash2 className="h-4 w-4 mr-1" /> Hatao
+                      </Button>
                     </TableCell>
                   </TableRow>
                 );
