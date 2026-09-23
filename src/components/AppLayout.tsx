@@ -1,8 +1,13 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import AppSidebar, { MobileMenuButton } from "@/components/AppSidebar";
 import { useAppContext } from "@/contexts/AppContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useCanteens } from "@/hooks/useSupabaseData";
 import NotificationBell from "@/components/NotificationBell";
+import { Button } from "@/components/ui/button";
+import { LogOut } from "lucide-react";
+import { toast } from "sonner";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -10,9 +15,17 @@ interface AppLayoutProps {
 }
 
 export default function AppLayout({ children, title }: AppLayoutProps) {
+  const navigate = useNavigate();
   const { selectedCanteen } = useAppContext();
+  const { signOut } = useAuth();
   const { data: canteens } = useCanteens();
   const canteenName = selectedCanteen === "all" ? "All Canteens" : canteens?.find((c: any) => c.id === selectedCanteen)?.name || "";
+
+  const handleSignOut = async () => {
+    await signOut();
+    toast.success("Signed out");
+    navigate("/login");
+  };
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-background">
@@ -26,8 +39,19 @@ export default function AppLayout({ children, title }: AppLayoutProps) {
               <p className="truncate text-[11px] text-muted-foreground">{canteenName}</p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2">
             <NotificationBell />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleSignOut}
+              aria-label="Sign out"
+              className="h-9 gap-1.5 px-2 sm:px-3"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Sign out</span>
+            </Button>
           </div>
         </header>
         <main className="min-w-0 max-w-full overflow-x-hidden p-4 lg:p-6">{children}</main>
