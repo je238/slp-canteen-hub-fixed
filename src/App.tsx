@@ -83,7 +83,7 @@ const App = () => (
                   <ProtectedRoute minRole="chef"><MenuPlanningPage /></ProtectedRoute>
                 } />
                 <Route path="/menu-scan" element={
-                  <ProtectedRoute minRole="unit_manager"><MenuScanPage /></ProtectedRoute>
+                  <ProtectedRoute minRole="head_supervisor"><MenuScanPage /></ProtectedRoute>
                 } />
                 <Route path="/requisitions" element={
                   <ProtectedRoute minRole="store_keeper"><RequisitionsPage /></ProtectedRoute>

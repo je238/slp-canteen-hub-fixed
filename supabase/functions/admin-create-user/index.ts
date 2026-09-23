@@ -7,11 +7,11 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
 };
 const rank: Record<string, number> = {
-  vendor: 10, store_keeper: 20, chef: 30, cashier: 30, head_chef: 35, unit_manager: 40,
+  vendor: 10, store_keeper: 20, chef: 30, cashier: 30, head_chef: 35, head_supervisor: 38, unit_manager: 40,
   manager: 40, ops_manager: 50, admin: 60, super_admin: 70, owner: 70,
 };
-const allowedRoles = ["admin", "ops_manager", "unit_manager", "head_chef", "chef", "store_keeper", "vendor"];
-const siteRoles = new Set(["ops_manager", "unit_manager", "head_chef", "chef", "store_keeper"]);
+const allowedRoles = ["admin", "ops_manager", "unit_manager", "head_supervisor", "head_chef", "chef", "store_keeper", "vendor"];
+const siteRoles = new Set(["ops_manager", "unit_manager", "head_supervisor", "head_chef", "chef", "store_keeper"]);
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }

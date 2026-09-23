@@ -178,7 +178,15 @@ export function useSaveMenuPlan() {
         return data;
       }
 
-      const { data, error } = await table.insert(fields).select().single();
+      // HS owns menu entry. Insert a new menu as a draft first, add its dish
+      // lines, and only then publish it. This keeps the database rule honest:
+      // HS may build draft lines, while a published-menu change is reserved
+      // for Manager correction.
+      const publishing = fields.status === "published";
+      const initialFields = publishing
+        ? { ...fields, status: "draft", published_at: null }
+        : fields;
+      const { data, error } = await table.insert(initialFields).select().single();
       if (error?.code === "23505") {
         const conflict = new Error("Is date aur meal ka menu pehle se bana hua hai. Existing menu refresh karke dikhaya gaya hai.") as Error & { code?: string };
         conflict.code = "MENU_ALREADY_EXISTS";
@@ -186,6 +194,12 @@ export function useSaveMenuPlan() {
       }
       if (error) throw error;
       if (items) await writeItems((data as any).id);   // new plan, nothing to replace
+      if (publishing) {
+        const { data: published, error: publishError } = await table
+          .update(fields).eq("id", (data as any).id).select().single();
+        if (publishError) throw publishError;
+        return published;
+      }
       return data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["menuPlans"] }),

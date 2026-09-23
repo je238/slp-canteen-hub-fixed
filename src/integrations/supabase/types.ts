@@ -2428,6 +2428,7 @@ export type Database = {
       is_admin_editor: { Args: never; Returns: boolean }
       is_chef: { Args: never; Returns: boolean }
       is_head_chef: { Args: never; Returns: boolean }
+      is_head_supervisor: { Args: never; Returns: boolean }
       is_manager_or_above: { Args: never; Returns: boolean }
       is_owner: { Args: never; Returns: boolean }
       is_store_keeper: { Args: never; Returns: boolean }

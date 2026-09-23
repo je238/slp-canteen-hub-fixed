@@ -22,13 +22,15 @@ import MenuUnitWastage from "@/components/MenuUnitWastage";
 const DRAFT_KEY = "menu-plan";
 import { toast } from "sonner";
 
-// Unit Manager plans each day's menu per meal period with an expected
+// Head Supervisor plans each day's menu per meal period with an expected
 // headcount, then publishes it — publishing is what puts it on the Chef's
 // screen and lets the chef raise a raw-material requisition against it.
 
 export default function MenuPlanningPage() {
   const { selectedCanteen, setSelectedCanteen } = useAppContext();
-  const { isManagerOrAbove, isChef, rank } = useAuth();
+  const { isManagerOrAbove, isHeadSupervisor, isChef, isOwner } = useAuth();
+  const canEnterMenuData = isHeadSupervisor || isManagerOrAbove;
+  const canDoInitialDataEntry = isHeadSupervisor || isOwner;
   const [params] = useSearchParams();
   // Arriving from the "menu published" notification, which names the day and
   // the unit it was published for. Without this the chef landed on today, on
@@ -191,15 +193,15 @@ export default function MenuPlanningPage() {
               <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-44" />
             </div>
             <p className="text-xs text-muted-foreground flex-1 min-w-[240px]">
-              Plan each meal with the expected headcount, then <b>Publish</b> — that sends it to the Chef,
-              who records production and raises the raw-material requisition against it.
+              HS har meal ka menu aur expected headcount dalega. <b>Publish</b> karne par Chef ko menu milega,
+              phir Chef raw-material requisition raise karega.
             </p>
           </CardContent>
         </Card>
 
         {/* A meal served but never counted is a meal the company is never
             billed for, so it is chased here rather than left to be noticed. */}
-        {isManagerOrAbove && (uncounted?.length ?? 0) > 0 && (
+        {canDoInitialDataEntry && (uncounted?.length ?? 0) > 0 && (
           <Card className="border-none shadow-sm bg-amber-500/10">
             <CardContent className="p-3">
               <p className="text-xs font-semibold mb-1.5">
@@ -223,7 +225,7 @@ export default function MenuPlanningPage() {
         {/* Tomorrow is the only day that can go to the chef, so it is the one
             thing on this screen that is actually due. Left to a list of thirty
             green and grey boxes, the evening's job disappears into it. */}
-        {isManagerOrAbove && (due?.length ?? 0) > 0 &&
+        {canDoInitialDataEntry && (due?.length ?? 0) > 0 &&
          due!.some((d: any) => d.status !== "published") && (
           <Card className="border-none shadow-sm bg-accent/10">
             <CardContent className="p-3 flex items-center gap-2 flex-wrap">
@@ -242,7 +244,7 @@ export default function MenuPlanningPage() {
           </Card>
         )}
 
-        {isManagerOrAbove && selectedCanteen !== "all" && (
+        {canDoInitialDataEntry && selectedCanteen !== "all" && (
           <PlanningWindow canteenId={selectedCanteen} current={date} onPick={setDate} />
         )}
 
@@ -349,7 +351,7 @@ export default function MenuPlanningPage() {
                                 )}
                               </div>
                             )}
-                            {isManagerOrAbove && plan.status !== "draft" &&
+                            {canEnterMenuData && plan.status !== "draft" &&
                              selectedCanteen !== "all" &&
                              ["breakfast", "lunch", "evening_snacks", "dinner", "night_snacks"].includes(plan.meal_period) && (
                               <MenuUnitWastage
@@ -372,7 +374,8 @@ export default function MenuPlanningPage() {
                     )}
                     {/* Three separate numbers prevent an estimate or a manual
                         counter from silently becoming the customer's bill. */}
-                    {isManagerOrAbove && plan && plan.status !== "draft" && (
+                    {plan && plan.status !== "draft" &&
+                     (canDoInitialDataEntry || (isManagerOrAbove && (plan.actual_headcount != null || plan.company_punch_count != null))) && (
                       <div className="rounded-md border bg-muted/30 p-2 space-y-1.5">
                         <div className="grid grid-cols-3 gap-1 text-center text-[10px]">
                           <div className="rounded border bg-background p-1"><span className="text-muted-foreground">EXPECTED</span><b className="block text-xs">{plan.expected_headcount}</b></div>
@@ -386,6 +389,9 @@ export default function MenuPlanningPage() {
                             placeholder={`Expected ${plan.expected_headcount}`}
                             defaultValue={plan.actual_headcount ?? ""}
                             key={`actual-${plan.id}-${plan.actual_headcount ?? ""}`}
+                            readOnly={isManagerOrAbove && !isOwner
+                              ? plan.actual_headcount == null
+                              : plan.actual_headcount != null && !isManagerOrAbove}
                             id={`actual-${plan.id}`}
                           /></div>
                           <div><Label className="text-[10px]">Eicher punch (Final)</Label>
@@ -393,11 +399,13 @@ export default function MenuPlanningPage() {
                             placeholder="Official punching count"
                             defaultValue={plan.company_punch_count ?? ""}
                             key={`punch-${plan.id}-${plan.company_punch_count ?? ""}`}
-                            readOnly={plan.company_punch_count != null && rank < 60}
+                            readOnly={isManagerOrAbove && !isOwner
+                              ? plan.company_punch_count == null
+                              : plan.company_punch_count != null && !isManagerOrAbove}
                             id={`punch-${plan.id}`}
                           /></div>
                         </div>
-                        {(plan.actual_headcount != null || plan.company_punch_count != null) && rank >= 60 && (
+                        {(plan.actual_headcount != null || plan.company_punch_count != null) && isManagerOrAbove && (
                           <Input className="h-8 text-xs" placeholder="Correction reason (count badalne par mandatory)" id={`count-reason-${plan.id}`} />
                         )}
                         <div className="flex items-center justify-between gap-2">
@@ -419,9 +427,9 @@ export default function MenuPlanningPage() {
                         </div>
                       </div>
                     )}
-                    {isManagerOrAbove && !isPast && (
+                    {!isPast && ((isHeadSupervisor && (!plan || plan.status === "draft")) || (isManagerOrAbove && !!plan)) && (
                       <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => openEditor(mp.value)}>
-                        {plan ? "Edit menu" : "Plan this meal"}
+                        {plan ? (plan.status === "published" ? "Manager correction" : "Edit menu") : "Plan this meal"}
                       </Button>
                     )}
                   </CardContent>
@@ -507,9 +515,11 @@ export default function MenuPlanningPage() {
             </div>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => submit(false)} disabled={savePlan.isPending}>Save draft</Button>
+            {editor?.status !== "published" && (
+              <Button variant="outline" onClick={() => submit(false)} disabled={savePlan.isPending}>Save draft</Button>
+            )}
             <Button onClick={() => submit(true)} disabled={savePlan.isPending}>
-              <Send className="w-4 h-4 mr-1.5" /> Publish to Chef
+              <Send className="w-4 h-4 mr-1.5" /> {editor?.status === "published" ? "Save correction" : "Publish to Chef"}
             </Button>
           </DialogFooter>
         </DialogContent>

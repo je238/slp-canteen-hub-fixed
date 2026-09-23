@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { canOpen, navFor } from "@/lib/navigation";
 
 describe("meal profit access", () => {
-  it.each(["super_admin", "admin", "ops_manager", "unit_manager", "manager"])(
+  it.each(["super_admin", "admin", "ops_manager"])(
     "shows and opens Meal Profit for %s",
     (role) => {
       expect(canOpen("/meal-profit", role)).toBe(true);
@@ -10,7 +10,7 @@ describe("meal profit access", () => {
     },
   );
 
-  it.each(["chef", "cashier", "store_keeper", "vendor"])(
+  it.each(["unit_manager", "manager", "head_supervisor", "head_chef", "chef", "cashier", "store_keeper", "vendor"])(
     "keeps Meal Profit hidden from %s",
     (role) => {
       expect(canOpen("/meal-profit", role)).toBe(false);

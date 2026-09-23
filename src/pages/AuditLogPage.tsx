@@ -33,6 +33,9 @@ const LABELS: Record<string, string> = {
   purchase_reversed: "Purchase reverse hui",
   plates_recorded: "Plates count record hua",
   item_unit_wastage_recorded: "Wastage record hua",
+  item_unit_wastage_corrected: "Manager ne wastage entry correct ki",
+  menu_dish_corrected: "Manager ne menu dish correct ki",
+  menu_dish_removed: "Manager ne menu dish remove ki",
   kitchen_return_accepted: "Kitchen return accept hua",
 };
 

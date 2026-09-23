@@ -21,7 +21,7 @@ import { CalendarDays, Camera, Check, ClipboardPaste, Plus, ScanLine, Send, Tras
 import { toast } from "sonner";
 
 // The client company sends the canteen its menu — a day's list or a whole
-// week's chart, usually on paper. The manager photographs it here instead of
+// week's chart, usually on paper. The Head Supervisor photographs it here instead of
 // retyping it, checks what the scan read, sets the expected headcount, and
 // publishes it. Publishing is what puts it on the chef's screen.
 

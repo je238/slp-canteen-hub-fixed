@@ -8,7 +8,7 @@ import { disablePush, syncExistingPush } from "@/lib/pushNotifications";
 // onto the same ranks the database uses in public.role_rank().
 export type UserRole =
   | "super_admin" | "admin" | "ops_manager" | "unit_manager"
-  | "head_chef" | "chef" | "store_keeper" | "vendor"
+  | "head_supervisor" | "head_chef" | "chef" | "store_keeper" | "vendor"
   | "owner" | "manager" | "cashier";   // legacy
 
 export const ROLE_RANK: Record<string, number> = {
@@ -16,6 +16,7 @@ export const ROLE_RANK: Record<string, number> = {
   admin: 60,
   ops_manager: 50,
   unit_manager: 40, manager: 40,
+  head_supervisor: 38,
   head_chef: 35,
   chef: 30, cashier: 30,
   store_keeper: 20,
@@ -27,6 +28,7 @@ export const ROLE_LABEL: Record<string, string> = {
   admin: "Admin",
   ops_manager: "Operations Manager",
   unit_manager: "Unit Manager", manager: "Unit Manager (legacy)",
+  head_supervisor: "Head Supervisor (HS)",
   head_chef: "Head Chef",
   chef: "Chef", cashier: "Chef (legacy cashier)",
   store_keeper: "Store Keeper",
@@ -54,6 +56,7 @@ interface AuthContextType {
   isOwner: boolean;              // admin and above (kept for existing callers)
   isManagerOrAbove: boolean;     // unit manager and above
   isStoreKeeperOrAbove: boolean;
+  isHeadSupervisor: boolean;
   isHeadChef: boolean;
   isChef: boolean;
   isVendor: boolean;
@@ -180,6 +183,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isOwner: rank >= 60,
       isManagerOrAbove: rank >= 40,
       isStoreKeeperOrAbove: rank >= 20,
+      isHeadSupervisor: roleKey === "head_supervisor",
       isHeadChef: roleKey === "head_chef",
       isChef: roleKey === "chef" || roleKey === "cashier",
       isVendor: roleKey === "vendor",
