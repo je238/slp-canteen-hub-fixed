@@ -16,7 +16,7 @@ vi.mock("@/hooks/useSupabaseData", () => ({
   useAddIngredient: () => ({}),
 }));
 vi.mock("@/hooks/useSrsData", () => ({
-  useIngredientRates: () => ({ data: [] }), useSaveInventoryItemEdit: () => ({}), useDeleteIngredient: () => ({}),
+  useIngredientRates: () => ({ data: [] }), useSaveInventoryItemEdit: () => ({}), useRenameIngredient: () => ({}), useDeleteIngredient: () => ({}),
 }));
 afterEach(cleanup);
 describe("manual inventory edit permission", () => {
@@ -31,5 +31,13 @@ describe("manual inventory edit permission", () => {
     auth.isOwner = true; auth.roleData.role = "admin";
     render(<InventoryPage />);
     expect(screen.getByRole("columnheader", { name: /^Edit$/ })).toBeInTheDocument();
+  });
+  it.each(["unit_manager", "manager"])("allows %s to rename only", (role) => {
+    auth.isOwner = false; auth.roleData.role = role;
+    render(<InventoryPage />);
+    expect(screen.getByRole("columnheader", { name: /^Name$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Oil ka naam badlo" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /^Edit$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
   });
 });

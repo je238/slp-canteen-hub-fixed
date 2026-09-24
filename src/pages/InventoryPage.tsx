@@ -16,7 +16,7 @@ import DailyRegister from "@/components/DailyRegister";
 import DuplicateItems from "@/components/DuplicateItems";
 import DeliverySchedule from "@/components/DeliverySchedule";
 import HistoricalUnitReview from "@/components/HistoricalUnitReview";
-import { useIngredientRates, useSaveInventoryItemEdit, useDeleteIngredient } from "@/hooks/useSrsData";
+import { useIngredientRates, useSaveInventoryItemEdit, useRenameIngredient, useDeleteIngredient } from "@/hooks/useSrsData";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const ingredientCategories = ["Grains", "Vegetables", "Meat", "Dairy", "Oils", "Spices", "Staples", "Beverages", "Other"];
@@ -32,6 +32,7 @@ export default function InventoryPage() {
   // and the manager approves the orders. Showing them a button the database
   // then refuses is the worst of both.
   const isStoreKeeper = String(roleData?.role).toLowerCase() === "store_keeper";
+  const isManager = ["unit_manager", "manager"].includes(String(roleData?.role).toLowerCase());
   // Manual inventory edits are reserved for Admin/Owner. Store Keepers keep
   // the separate receipt, issue, return and delivery-schedule workflows.
   const canAdjustStock = isAdmin;
@@ -46,6 +47,7 @@ export default function InventoryPage() {
   const rateOf = (id: string) => (rates || []).find((r: any) => r.ingredient_id === id);
   const addIngredient = useAddIngredient();
   const saveInventoryEdit = useSaveInventoryItemEdit();
+  const renameIngredient = useRenameIngredient();
   const removeItem = useDeleteIngredient();
 
   // Admins have full removal control. Traded items are archived instead of
@@ -75,6 +77,8 @@ export default function InventoryPage() {
   const [search, setSearch] = useState("");
   const [addDialog, setAddDialog] = useState(false);
   const [adjustDialog, setAdjustDialog] = useState<{ id: string; name: string; current: number; canteen_id: string; unit?: string; rate?: number } | null>(null);
+  const [renameDialog, setRenameDialog] = useState<{ id: string; name: string } | null>(null);
+  const [renameReason, setRenameReason] = useState("");
   const [newRate, setNewRate] = useState("");
   const [newName, setNewName] = useState("");
   const [newUnit, setNewUnit] = useState("kg");
@@ -178,6 +182,20 @@ export default function InventoryPage() {
       toast.success(stockChanged || unitChanged ? "Inventory updated!" : "Saved");
       setAdjustDialog(null);
       setReason(""); setNewRate(""); setNewName(""); setNewUnit("kg"); setUnitChangeConfirmed(false);
+    } catch (err: any) { toast.error(err.message); }
+  };
+
+  const handleRename = async () => {
+    if (!isManager || !renameDialog) return;
+    const nextName = newName.trim();
+    if (nextName.length < 2) { toast.error("Item ka poora naam likhein"); return; }
+    if (renameReason.trim().length < 3) { toast.error("Naam badalne ka reason likhein"); return; }
+    if (nextName === renameDialog.name) { setRenameDialog(null); return; }
+    try {
+      await renameIngredient.mutateAsync({ id: renameDialog.id, name: nextName, reason: renameReason.trim() });
+      toast.success(`"${renameDialog.name}" ka naam "${nextName}" ho gaya`);
+      setRenameDialog(null);
+      setRenameReason("");
     } catch (err: any) { toast.error(err.message); }
   };
 
@@ -294,7 +312,7 @@ export default function InventoryPage() {
                     <th className="text-right py-2.5 font-medium">Days Left</th>
                     <th className="text-center py-2.5 font-medium">Status</th>
                     <th className="text-center py-2.5 font-medium">History</th>
-                    {(canAdjustStock || canEditDetails) && <th className="text-center py-2.5 font-medium">Edit</th>}
+                    {(canAdjustStock || canEditDetails || isManager) && <th className="text-center py-2.5 font-medium">{isManager ? "Name" : "Edit"}</th>}
                     {(isAdmin || isStoreKeeper) && <th className="text-center py-2.5 font-medium">Delete</th>}
                   </tr></thead>
                   <tbody>
@@ -356,13 +374,19 @@ export default function InventoryPage() {
                               <History className="w-3.5 h-3.5 text-muted-foreground" />
                             </button>
                           </td>
-                          {(canAdjustStock || canEditDetails) && <td className="py-2.5 text-center">
-                            <button
+                          {(canAdjustStock || canEditDetails || isManager) && <td className="py-2.5 text-center">
+                            {isManager ? <button
+                              onClick={() => { setRenameDialog({ id: item.id, name: item.name }); setNewName(item.name); setRenameReason(""); }}
+                              aria-label={`${item.name} ka naam badlo`}
+                              title="Sirf item ka naam badlo"
+                              className="p-1 rounded hover:bg-muted"
+                            ><Edit2 className="w-3.5 h-3.5 text-muted-foreground" /></button> : <button
                               onClick={() => { setAdjustDialog({ id: item.id, name: item.name, current: Number(item.current_stock), canteen_id: item.canteen_id, unit: item.unit, rate: Number(item.cost_per_unit ?? rateOf(item.id)?.latest_rate ?? 0) }); setNewStock(Number(item.current_stock)); setNewName(item.name); setNewUnit(item.unit || "kg"); setUnitChangeConfirmed(false); setNewRate(""); setAvgUsage(item.avg_daily_usage ? String(Number(item.avg_daily_usage)) : ""); setReorderLevel(item.reorder_level != null ? String(Number(item.reorder_level)) : ""); setMaxStock(item.maximum_stock != null ? String(Number(item.maximum_stock)) : ""); }}
+                              aria-label={`${item.name} edit karo`}
                               className="p-1 rounded hover:bg-muted"
                             >
                               <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
-                            </button>
+                            </button>}
                           </td>}
                           {(isAdmin || isStoreKeeper) && <td className="py-2.5 text-center">
                             <button
@@ -409,6 +433,23 @@ export default function InventoryPage() {
         </Card>
           </TabsContent>
         </Tabs>
+
+        <Dialog open={!!renameDialog} onOpenChange={(open) => { if (!open && !renameIngredient.isPending) setRenameDialog(null); }}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Item ka naam badlo</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Abhi: {renameDialog?.name}</p>
+              <div><Label htmlFor="manager-item-name">Naya naam</Label>
+                <Input id="manager-item-name" value={newName} onChange={(e) => setNewName(e.target.value)} /></div>
+              <div><Label htmlFor="manager-rename-reason">Reason</Label>
+                <Input id="manager-rename-reason" value={renameReason} onChange={(e) => setRenameReason(e.target.value)} placeholder="e.g. spelling correction" /></div>
+              <p className="text-xs text-muted-foreground">Naam badalne ka record rahega. Same naam ka item pehle se ho to app merge karne ko bolega.</p>
+              <Button className="w-full" onClick={handleRename} disabled={renameIngredient.isPending}>
+                {renameIngredient.isPending ? "Saving…" : "Naam save karo"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Adjust Dialog */}
         <Dialog open={!!adjustDialog} onOpenChange={(open) => { if (!open) setAdjustDialog(null); }}>

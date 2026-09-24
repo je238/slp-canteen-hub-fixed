@@ -58,7 +58,7 @@ export default function RequisitionsPage() {
   const canAdminCorrect = rank >= 60;
   const isStoreKeeper = String(roleData.role).toLowerCase() === "store_keeper";
   const [kitchenDate, setKitchenDate] = useState(todayIst());
-  const { data: reqs, isLoading } = useRequisitions(selectedCanteen);
+  const { data: reqs, isLoading, isError: requisitionsError, error: requisitionsLoadError, refetch: refetchRequisitions, isFetching: requisitionsFetching } = useRequisitions(selectedCanteen);
   const { data: ingredients } = useIngredients(selectedCanteen);
   // Yesterday, today AND tomorrow. The chef orders in the afternoon for food
   // that will be cooked tomorrow — the store issues that same evening between
@@ -1162,8 +1162,20 @@ export default function RequisitionsPage() {
               </CardContent>
             </Card>
 
+            {requisitionsError && <Card className="mt-3 border-destructive/40">
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+                <div>
+                  <p className="font-semibold text-destructive">Orders load nahi hue</p>
+                  <p className="text-xs text-muted-foreground">{requisitionsLoadError instanceof Error ? requisitionsLoadError.message : "Connection check karke dobara try karein."}</p>
+                </div>
+                <Button variant="outline" onClick={() => refetchRequisitions()} disabled={requisitionsFetching}>
+                  {requisitionsFetching ? "Loading…" : "Dobara load karo"}
+                </Button>
+              </CardContent>
+            </Card>}
+
             <TabsContent value="pending" className="mt-3 space-y-3">
-              {isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> :
+              {requisitionsError ? null : isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> :
                renderDateGroupedRequisitions(pending, "pending", "Nothing waiting for approval.", (r: any) =>
                   isHeadChef ? (
                     r.head_chef_required && r.head_chef_status !== "approved" ? (
@@ -1183,7 +1195,7 @@ export default function RequisitionsPage() {
             </TabsContent>
 
             <TabsContent value="approved" className="mt-3 space-y-3">
-              {canProcessApproved && pendingShortRows.length > 0 && (
+              {!isLoading && !requisitionsError && canProcessApproved && pendingShortRows.length > 0 && (
                 <Card className="border-accent/20 bg-accent/5 shadow-sm">
                   <CardContent className="p-4 space-y-3">
                     <div>
@@ -1212,7 +1224,7 @@ export default function RequisitionsPage() {
                   </CardContent>
                 </Card>
               )}
-              {renderDateGroupedRequisitions(approvedList, "approved", "Nothing approved and waiting.", (r: any) =>
+              {requisitionsError ? null : isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : renderDateGroupedRequisitions(approvedList, "approved", "Nothing approved and waiting.", (r: any) =>
                   <div className="flex gap-2 flex-wrap justify-end">
                      {canAdminCorrect && (
                          <Button size="sm" variant="outline" onClick={() => openCorrection(r)}>
@@ -1249,7 +1261,7 @@ export default function RequisitionsPage() {
             </TabsContent>
 
             <TabsContent value="history" className="mt-3 space-y-3">
-              {renderDateGroupedRequisitions(done, "history", "No history yet.")}
+              {requisitionsError ? null : isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : renderDateGroupedRequisitions(done, "history", "No history yet.")}
             </TabsContent>
 
             {canIssueStock && !isChef && (
