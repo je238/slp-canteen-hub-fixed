@@ -125,7 +125,7 @@ const App = () => (
                   <ProtectedRoute minRole="unit_manager"><BudgetPage /></ProtectedRoute>
                 } />
                 <Route path="/reports-center" element={
-                  <ProtectedRoute minRole="unit_manager"><ReportsCenterPage /></ProtectedRoute>
+                  <ProtectedRoute minRole="head_chef"><ReportsCenterPage /></ProtectedRoute>
                 } />
                 <Route path="/meal-profit" element={
                   <ProtectedRoute minRole="unit_manager"><MealProfitPage /></ProtectedRoute>

@@ -12,13 +12,23 @@ describe("Head Supervisor and Manager access", () => {
     expect(homeFor("head_supervisor")).toBe("/menu-planning");
   });
 
-  it("keeps Manager on correction and requisition approval screens", () => {
+  it("restores the Manager's earlier operational and reporting screens", () => {
     expect(navFor("unit_manager").map((entry) => entry.path)).toEqual([
+      "/dashboard",
       "/menu-planning",
       "/requisitions",
+      "/recipes",
+      "/menu-scan",
+      "/inventory",
+      "/central-kitchen",
+      "/purchases",
+      "/vendors",
+      "/reports-center",
+      "/meal-profit",
+      "/canteens",
     ]);
-    expect(canOpen("/menu-scan", "unit_manager")).toBe(false);
-    expect(canOpen("/inventory", "unit_manager")).toBe(false);
+    expect(canOpen("/menu-scan", "unit_manager")).toBe(true);
+    expect(canOpen("/inventory", "unit_manager")).toBe(true);
     expect(homeFor("unit_manager")).toBe("/requisitions");
   });
 

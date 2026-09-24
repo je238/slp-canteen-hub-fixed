@@ -39,6 +39,7 @@ const EVERYONE_INSIDE = [
 const ADMIN_UP = ["admin", "super_admin", "owner"];
 const APPROVAL_MANAGERS = ["unit_manager", "manager"];
 const SENIOR_READ = ["ops_manager", ...ADMIN_UP];
+const MANAGER_READ = [...APPROVAL_MANAGERS, ...SENIOR_READ];
 const STORE_AND_ADMIN = ["store_keeper", ...ADMIN_UP];
 
 // Neither the owner nor the admin works the counter. Screens that are
@@ -59,7 +60,7 @@ export const NAV: NavEntry[] = [
     roles: ["vendor", ...ADMIN_UP], hideFrom: OWNER_AND_ADMIN },
 
   { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard,
-    roles: ["store_keeper", ...SENIOR_READ] },
+    roles: ["store_keeper", ...MANAGER_READ] },
 
   // Kitchen. Menu & Production and Requisitions stay on the owner's menu:
   // that is where a plate count or an approved quantity gets corrected, and
@@ -69,32 +70,34 @@ export const NAV: NavEntry[] = [
   { path: "/requisitions", label: "Requisitions", icon: ClipboardList,
     roles: EVERYONE_INSIDE },
   { path: "/recipes", label: "Recipes", icon: ChefHat,
-    roles: ["chef", ...ADMIN_UP], hideFrom: OWNER_AND_ADMIN },
+    roles: ["chef", "head_chef", ...APPROVAL_MANAGERS, ...ADMIN_UP], hideFrom: OWNER_AND_ADMIN },
   // The Head Supervisor's morning menu/data-entry job.
   { path: "/menu-scan", label: "Daily Menu", icon: ScanLine,
-    roles: ["head_supervisor", ...ADMIN_UP], hideFrom: OWNER_AND_ADMIN },
+    roles: ["head_supervisor", ...APPROVAL_MANAGERS, ...ADMIN_UP], hideFrom: OWNER_AND_ADMIN },
 
   // Store. Scanning bills is the store keeper's job.
   { path: "/invoice-scan", label: "Invoice Scan", icon: ScanLine,
     roles: STORE_AND_ADMIN, hideFrom: OWNER_AND_ADMIN },
-  { path: "/inventory", label: "Inventory", icon: Package, roles: ["store_keeper", ...SENIOR_READ] },
+  { path: "/inventory", label: "Inventory", icon: Package, roles: ["store_keeper", ...MANAGER_READ] },
   { path: "/central-kitchen", label: "Central Kitchen", icon: ArrowLeftRight,
-    roles: ["store_keeper", ...SENIOR_READ] },
-  { path: "/purchases", label: "Purchases", icon: Truck, roles: ["store_keeper", ...SENIOR_READ] },
+    roles: ["store_keeper", ...MANAGER_READ] },
+  { path: "/purchases", label: "Purchases", icon: Truck, roles: ["store_keeper", ...MANAGER_READ] },
   { path: "/vendor-bills", label: "Vendor Bills", icon: FileUp, roles: STORE_AND_ADMIN },
 
   // Masters and money.
-  { path: "/vendors", label: "Vendor Master", icon: Store, roles: ["store_keeper", ...SENIOR_READ] },
+  { path: "/vendors", label: "Vendor Master", icon: Store, roles: ["store_keeper", ...MANAGER_READ] },
   { path: "/expenses", label: "Expenses", icon: Wallet, roles: ["ops_manager", ...ADMIN_UP], hideFrom: OPS_ONLY },
   { path: "/budgets", label: "Budgets", icon: Target, roles: ["ops_manager", ...ADMIN_UP], hideFrom: OPS_ONLY },
-  { path: "/reports-center", label: "Reports", icon: BarChart3, roles: SENIOR_READ },
-  { path: "/meal-profit", label: "Meal Profit", icon: BarChart3, roles: SENIOR_READ },
+  { path: "/reports-center", label: "Reports", icon: BarChart3,
+    roles: ["head_chef", ...MANAGER_READ] },
+  { path: "/meal-profit", label: "Meal Profit", icon: BarChart3, roles: MANAGER_READ },
   { path: "/site-performance", label: "Site Performance", icon: LayoutDashboard,
     roles: ["ops_manager", ...ADMIN_UP] },
   { path: "/stock-audit", label: "Stock Verification", icon: ClipboardCheck, roles: STORE_AND_ADMIN },
 
   // Administration
-  { path: "/canteens", label: "Sites", icon: Building2, roles: ADMIN_UP },
+  { path: "/canteens", label: "Sites", icon: Building2,
+    roles: [...APPROVAL_MANAGERS, ...ADMIN_UP] },
   { path: "/users", label: "User Management", icon: Shield, roles: ADMIN_UP },
   { path: "/executive-alerts", label: "Executive Alerts", icon: AlertTriangle, roles: ["ops_manager",...ADMIN_UP] },
   { path: "/audit-log", label: "Audit & Changes", icon: History, roles: ["ops_manager",...ADMIN_UP] },
