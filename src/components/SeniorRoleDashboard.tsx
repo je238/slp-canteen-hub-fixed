@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -104,38 +105,52 @@ function LinkButton({ children, to }: { children: React.ReactNode; to: string })
   return <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate(to)}>{children}<ArrowRight className="w-3.5 h-3.5" /></Button>;
 }
 
-export default function SeniorRoleDashboard({ role }: { role: string }) {
+export default function SeniorRoleDashboard({ role, selectedCanteen }: { role: string; selectedCanteen: string }) {
   if (["ops_manager", "super_admin", "owner"].includes(role)) {
-    return <ExecutiveControlDashboard role={role} />;
+    return <ExecutiveControlDashboard role={role} selectedCanteen={selectedCanteen} />;
   }
   const date = localIso();
   const from = clampToCutover(localIso(-29));
   const { data: sites = [], isLoading: sitesLoading } = useSitePerformance(from, date);
   const { data: controls, isLoading: controlsLoading } = useSeniorControls(role, date);
   const isAdmin = role === "admin";
-  const { data: duplicateCount = 0 } = useDuplicateCount(sites.map((s: any) => s.canteen_id), isAdmin);
+  const visibleSites = useMemo(() => selectedCanteen === "all"
+    ? sites
+    : sites.filter((site: any) => site.canteen_id === selectedCanteen), [sites, selectedCanteen]);
+  const visibleControls = useMemo(() => {
+    if (!controls || selectedCanteen === "all") return controls;
+    const scoped = (rows: any[]) => rows.filter((row) => row.canteen_id === selectedCanteen);
+    return {
+      requisitions: scoped(controls.requisitions), menus: scoped(controls.menus),
+      ingredients: scoped(controls.ingredients), purchases: scoped(controls.purchases),
+      notifications: scoped(controls.notifications), users: scoped(controls.users),
+      unitReviews: scoped(controls.unitReviews), corrections: scoped(controls.corrections),
+      logs: scoped(controls.logs),
+    };
+  }, [controls, selectedCanteen]);
+  const { data: duplicateCount = 0 } = useDuplicateCount(visibleSites.map((s: any) => s.canteen_id), isAdmin);
 
-  if (sitesLoading || controlsLoading || !controls) {
+  if (sitesLoading || controlsLoading || !visibleControls) {
     return <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Dashboard load ho raha hai…</CardContent></Card>;
   }
 
-  const totals = sites.reduce((a: any, s: any) => ({
+  const totals = visibleSites.reduce((a: any, s: any) => ({
     revenue: a.revenue + Number(s.revenue || 0), consumption: a.consumption + Number(s.consumption || 0),
     purchase: a.purchase + Number(s.purchase || 0), inventory: a.inventory + Number(s.inventory_value || 0),
     heads: a.heads + Number(s.headcount || 0), alerts: a.alerts + Number(s.open_alerts || 0),
   }), { revenue: 0, consumption: 0, purchase: 0, inventory: 0, heads: 0, alerts: 0 });
   const foodCost = totals.revenue > 0 ? totals.consumption * 100 / totals.revenue : null;
-  const pendingApprovals = controls.requisitions.filter((r) => ["submitted", "pending"].includes(r.status)).length;
-  const pendingIssues = controls.requisitions.filter((r) => ["approved", "partially_issued"].includes(r.status)).length;
-  const missingPlates = controls.menus.filter((m) => m.status === "published" && m.actual_headcount == null).length;
-  const lowStock = controls.ingredients.filter((i) => Number(i.current_stock) <= Number(i.reorder_level ?? i.minimum_stock ?? 0)).length;
-  const unpaidToday = controls.purchases.filter((p) => p.payment_status !== "paid")
+  const pendingApprovals = visibleControls.requisitions.filter((r) => ["submitted", "pending"].includes(r.status)).length;
+  const pendingIssues = visibleControls.requisitions.filter((r) => ["approved", "partially_issued"].includes(r.status)).length;
+  const missingPlates = visibleControls.menus.filter((m) => m.status === "published" && m.actual_headcount == null).length;
+  const lowStock = visibleControls.ingredients.filter((i) => Number(i.current_stock) <= Number(i.reorder_level ?? i.minimum_stock ?? 0)).length;
+  const unpaidToday = visibleControls.purchases.filter((p) => p.payment_status !== "paid")
     .reduce((sum, p) => sum + Number(p.total_amount || 0), 0);
 
-  const bySite = sites.map((site: any) => {
-    const siteReqs = controls.requisitions.filter((r) => r.canteen_id === site.canteen_id);
-    const siteMenus = controls.menus.filter((m) => m.canteen_id === site.canteen_id);
-    const siteLow = controls.ingredients.filter((i) => i.canteen_id === site.canteen_id && Number(i.current_stock) <= Number(i.reorder_level ?? i.minimum_stock ?? 0)).length;
+  const bySite = visibleSites.map((site: any) => {
+    const siteReqs = visibleControls.requisitions.filter((r) => r.canteen_id === site.canteen_id);
+    const siteMenus = visibleControls.menus.filter((m) => m.canteen_id === site.canteen_id);
+    const siteLow = visibleControls.ingredients.filter((i) => i.canteen_id === site.canteen_id && Number(i.current_stock) <= Number(i.reorder_level ?? i.minimum_stock ?? 0)).length;
     const approval = siteReqs.filter((r) => ["submitted", "pending"].includes(r.status)).length;
     const issue = siteReqs.filter((r) => ["approved", "partially_issued"].includes(r.status)).length;
     const plates = siteMenus.filter((m) => m.status === "published" && m.actual_headcount == null).length;
@@ -148,7 +163,7 @@ export default function SeniorRoleDashboard({ role }: { role: string }) {
       missingPlates={missingPlates} lowStock={lowStock} />;
   }
   if (role === "admin") {
-    return <AdminDashboard sites={sites} controls={controls} duplicateCount={duplicateCount}
+    return <AdminDashboard sites={visibleSites} controls={visibleControls} duplicateCount={duplicateCount}
       lowStock={lowStock} pendingApprovals={pendingApprovals} />;
   }
   return <OwnerDashboard sites={bySite} totals={totals} foodCost={foodCost} pendingIssues={pendingIssues}

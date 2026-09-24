@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAppContext } from "@/contexts/AppContext";
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const daysAgo = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n + 1); return iso(d); };
@@ -36,13 +37,18 @@ function Delta({ value, lowerIsBetter = false }: { value: number | null; lowerIs
 }
 
 export default function SitePerformancePage() {
+  const { selectedCanteen } = useAppContext();
   const [from, setFrom] = useState(clampToCutover(daysAgo(30)));
   const [to, setTo] = useState(iso(new Date()));
   const current = useSitePerformance(from, to);
   const prior = previousRange(from, to);
   const previous = useSitePerformance(prior.available ? prior.from : undefined, prior.available ? prior.to : undefined);
-  const priorById = new Map((previous.data || []).map((x: any) => [x.canteen_id, x]));
-  const rows = useMemo(() => [...(current.data || [])].sort((a: any, b: any) => status(b).rank - status(a).rank || Number(b.revenue) - Number(a.revenue)), [current.data]);
+  const priorRows = selectedCanteen === "all" ? (previous.data || [])
+    : (previous.data || []).filter((row: any) => row.canteen_id === selectedCanteen);
+  const priorById = new Map(priorRows.map((x: any) => [x.canteen_id, x]));
+  const rows = useMemo(() => [...(current.data || [])]
+    .filter((row: any) => selectedCanteen === "all" || row.canteen_id === selectedCanteen)
+    .sort((a: any, b: any) => status(b).rank - status(a).rank || Number(b.revenue) - Number(a.revenue)), [current.data, selectedCanteen]);
   const totals = rows.reduce((a: any, x: any) => ({
     headcount: a.headcount + Number(x.headcount || 0), revenue: a.revenue + Number(x.revenue || 0),
     consumption: a.consumption + Number(x.consumption || 0), purchase: a.purchase + Number(x.purchase || 0),

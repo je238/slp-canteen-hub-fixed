@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useCanteens, useUserDirectory } from "@/hooks/useSupabaseData";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { useAppContext } from "@/contexts/AppContext";
 
 const IMPORTANT_ACTIONS = [
   "stock_adjusted","rate_corrected","ingredient_renamed","ingredient_unit_changed","ingredient_removed","ingredient_merged",
@@ -48,6 +49,7 @@ type FeedItem={
 };
 
 export default function ExecutiveAlertsPage(){
+  const {selectedCanteen}=useAppContext();
   const [search,setSearch]=useState("");
   const [alertFilter,setAlertFilter]=useState<"all"|"critical">("all");
   const [review,setReview]=useState<FeedItem|null>(null);
@@ -278,8 +280,10 @@ export default function ExecutiveAlertsPage(){
     const failed=new Map<string,any[]>();for(const s of raw.scans)if(s.status==="failed")failed.set(s.canteen_id,[...(failed.get(s.canteen_id)||[]),s]);for(const [site,list] of failed)if(list.length>=2)out.push({key:`scan-${site}`,source:"automatic",siteId:site,site:siteNames[site]||"Site",title:"Invoice scanner repeatedly fail hua",description:`${list.length} failures in 7 days`,severity:"warning",status:"open",at:list[0].created_at,oldValue:"0",newValue:String(list.length),reason:list[0].error_message||"OCR service/timeout review required",person:users[list[0].user_id]||"—"});
     for(const u of raw.units)out.push({key:`unit-${u.purchase_item_id}`,source:"automatic",siteId:u.canteen_id,site:siteNames[u.canteen_id]||"Site",title:"Bill unit aur inventory unit alag",description:u.item_name,severity:"warning",status:"open",at:u.created_at,oldValue:u.bill_unit,newValue:u.master_unit,reason:u.conversion_note||"Paper bill aur physical stock se verify karein"});
 
-    return out.sort((a,b)=>new Date(b.at).getTime()-new Date(a.at).getTime());
-  },[raw,siteNames,users]);
+    return out
+      .filter((item)=>selectedCanteen==="all"||item.siteId===selectedCanteen)
+      .sort((a,b)=>new Date(b.at).getTime()-new Date(a.at).getTime());
+  },[raw,siteNames,users,selectedCanteen]);
 
   const searched=useMemo(()=>{const q=search.trim().toLowerCase();return q?feed.filter(x=>[x.site,x.title,x.description,x.reason,x.person,JSON.stringify(x.details||[]),JSON.stringify(x.history||[])].join(" ").toLowerCase().includes(q)):feed;},[feed,search]);
   const visible=useMemo(()=>alertFilter==="critical"?searched.filter(x=>x.severity==="critical"):searched,[searched,alertFilter]);

@@ -8,6 +8,7 @@ import NotificationBell from "@/components/NotificationBell";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import { toast } from "sonner";
+import UnitSwitcher from "@/components/UnitSwitcher";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -19,7 +20,9 @@ export default function AppLayout({ children, title }: AppLayoutProps) {
   const { selectedCanteen } = useAppContext();
   const { signOut } = useAuth();
   const { data: canteens } = useCanteens();
-  const canteenName = selectedCanteen === "all" ? "All Canteens" : canteens?.find((c: any) => c.id === selectedCanteen)?.name || "";
+  const canteenName = selectedCanteen === "all"
+    ? "Combined view · unit-wise data"
+    : canteens?.find((c: any) => c.id === selectedCanteen)?.name || "";
 
   const handleSignOut = async () => {
     await signOut();
@@ -40,6 +43,7 @@ export default function AppLayout({ children, title }: AppLayoutProps) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <UnitSwitcher />
             <NotificationBell />
             <Button
               type="button"

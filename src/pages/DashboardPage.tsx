@@ -79,7 +79,7 @@ export default function DashboardPage() {
   if (extraLines.length) issueMeals.push({ value: "extra", label: "Extra saman", lines: extraLines });
 
   if (isSeniorRole) {
-    return <AppLayout title="Dashboard"><SeniorRoleDashboard role={role} /></AppLayout>;
+    return <AppLayout title="Dashboard"><SeniorRoleDashboard role={role} selectedCanteen={selectedCanteen} /></AppLayout>;
   }
 
   if (selectedCanteen === "all") {

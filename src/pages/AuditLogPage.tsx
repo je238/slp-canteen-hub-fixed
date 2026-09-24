@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useAppContext } from "@/contexts/AppContext";
-import { useAuth } from "@/contexts/AuthContext";
 import { useCanteens, useUserDirectory } from "@/hooks/useSupabaseData";
 import { supabase } from "@/integrations/supabase/client";
 import { clampToCutover, REPORTING_CUTOVER_DATE } from "@/lib/cutover";
@@ -79,8 +78,6 @@ function reasonOf(details: any) {
 
 export default function AuditLogPage() {
   const { selectedCanteen } = useAppContext();
-  const { roleData } = useAuth();
-  const isOpsManager = roleData?.role === "ops_manager";
   const [from, setFrom] = useState(clampToCutover(isoDaysAgo(30)));
   const [search, setSearch] = useState("");
   const { data: users = {} } = useUserDirectory();
@@ -90,9 +87,9 @@ export default function AuditLogPage() {
     queryFn: async () => {
       let query = supabase.from("action_logs").select("id,user_id,action,entity_type,entity_id,canteen_id,created_at,details")
         .gte("created_at", `${from}T00:00:00+05:30`).order("created_at", { ascending: false }).limit(500);
-      // GM ko uski saari assigned sites ek jagah dikhni chahiye. RLS query ko
-      // assigned sites tak hi rokta hai; owner/admin ka normal site filter rahega.
-      if (!isOpsManager && selectedCanteen !== "all") query = query.eq("canteen_id", selectedCanteen);
+      // RLS accessible units ko secure rakhta hai; global selector un rows
+      // me se ek chosen unit ya saari assigned units dikhata hai.
+      if (selectedCanteen !== "all") query = query.eq("canteen_id", selectedCanteen);
       const { data, error: queryError } = await query;
       if (queryError) throw queryError;
       return (data || []) as any[];
@@ -125,7 +122,7 @@ export default function AuditLogPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <Card className="border-none shadow-sm"><CardContent className="p-4"><p className="text-xs text-muted-foreground">Changes shown</p><p className="text-xl font-bold">{filtered.length}</p></CardContent></Card>
         <Card className="border-none shadow-sm"><CardContent className="p-4"><p className="text-xs text-muted-foreground">From</p><p className="text-base font-bold">{new Date(`${from}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p></CardContent></Card>
-        <Card className="border-none shadow-sm col-span-2 sm:col-span-1"><CardContent className="p-4"><p className="text-xs text-muted-foreground">Site</p><p className="text-base font-bold truncate">{isOpsManager ? "All assigned sites" : selectedCanteen === "all" ? "All accessible sites" : siteNames[selectedCanteen] || "Selected site"}</p></CardContent></Card>
+        <Card className="border-none shadow-sm col-span-2 sm:col-span-1"><CardContent className="p-4"><p className="text-xs text-muted-foreground">Unit</p><p className="text-base font-bold truncate">{selectedCanteen === "all" ? "All accessible units" : siteNames[selectedCanteen] || "Selected unit"}</p></CardContent></Card>
       </div>
 
       {error ? <Card><CardContent className="p-8 text-center text-sm text-destructive">Audit records load nahi hue. Access check karein.</CardContent></Card>

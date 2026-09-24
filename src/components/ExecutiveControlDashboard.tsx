@@ -65,13 +65,16 @@ function alertsFor(rows: any[], gm: boolean): AlertItem[] {
   return out.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "red" ? -1 : 1));
 }
 
-export default function ExecutiveControlDashboard({ role }: { role: string }) {
+export default function ExecutiveControlDashboard({ role, selectedCanteen }: { role: string; selectedCanteen: string }) {
   const gm = role === "ops_manager";
   const [date, setDate] = useState(todayIso());
   const { data: rows = [], isLoading, error } = useExecutiveSiteDashboard(date);
   const navigate = useNavigate();
+  const visibleRows = useMemo(() => selectedCanteen === "all"
+    ? rows
+    : rows.filter((row: any) => row.canteen_id === selectedCanteen), [rows, selectedCanteen]);
 
-  const totals = useMemo(() => rows.reduce((a: any, row: any) => {
+  const totals = useMemo(() => visibleRows.reduce((a: any, row: any) => {
     for (const key of ["sale","consumption","expected_headcount","plates_served","wastage_qty","wastage_value_estimate",
       "purchase_amount","unpaid_amount","inventory_value","menu_total","menu_published","orders_total","approvals_pending",
       "issues_pending","pending_item_count","returned_qty","returns_pending","open_alerts","ledger_mismatch_count",
@@ -79,11 +82,11 @@ export default function ExecutiveControlDashboard({ role }: { role: string }) {
       a[key] = Number(a[key] || 0) + Number(row[key] || 0);
     }
     return a;
-  }, {}), [rows]);
+  }, {}), [visibleRows]);
   const foodCost = totals.sale > 0 ? totals.consumption * 100 / totals.sale : null;
   const costPerPlate = totals.plates_served > 0 ? totals.consumption / totals.plates_served : null;
-  const alerts = useMemo(() => alertsFor(rows, gm), [rows, gm]);
-  const activeSites = rows.filter((r: any) => Number(r.menu_total) > 0 || Number(r.orders_total) > 0 || Number(r.purchase_amount) > 0).length;
+  const alerts = useMemo(() => alertsFor(visibleRows, gm), [visibleRows, gm]);
+  const activeSites = visibleRows.filter((r: any) => Number(r.menu_total) > 0 || Number(r.orders_total) > 0 || Number(r.purchase_amount) > 0).length;
 
   if (isLoading) return <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Control dashboard load ho raha hai…</CardContent></Card>;
   if (error) return <Card><CardContent className="p-8 text-center text-sm text-destructive">Executive dashboard load nahi hua. Database migration/access check karein.</CardContent></Card>;
@@ -95,8 +98,8 @@ export default function ExecutiveControlDashboard({ role }: { role: string }) {
     </div>
 
     {gm ? <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-      <Metric label="Operational sites" value={`${activeSites}/${rows.length}`} sub="aaj activity wali sites" icon={Building2} to="/site-performance" danger={activeSites < rows.length} />
-      <Metric label="Menu published" value={`${totals.menu_published}/${Math.max(rows.length * 5, totals.menu_total)}`} icon={CalendarDays} to="/menu-planning" danger={totals.menu_published < rows.length * 5} />
+      <Metric label="Operational sites" value={`${activeSites}/${visibleRows.length}`} sub="aaj activity wali units" icon={Building2} to="/site-performance" danger={activeSites < visibleRows.length} />
+      <Metric label="Menu published" value={`${totals.menu_published || 0}/${Math.max(visibleRows.length * 5, Number(totals.menu_total || 0))}`} icon={CalendarDays} to="/menu-planning" danger={Number(totals.menu_published || 0) < visibleRows.length * 5} />
       <Metric label="Approval / issue pending" value={`${totals.approvals_pending} / ${totals.issues_pending}`} icon={ClipboardList} to="/requisitions" danger={totals.approvals_pending + totals.issues_pending > 0} />
       <Metric label="Items dena baaki" value={totals.pending_item_count || 0} icon={Package} to="/requisitions" danger={totals.pending_item_count > 0} />
       <Metric label="Critical stock" value={totals.critical_stock_count || 0} sub={`${totals.low_stock_count || 0} low stock`} icon={AlertTriangle} to="/inventory" danger={totals.critical_stock_count > 0} />
@@ -126,8 +129,8 @@ export default function ExecutiveControlDashboard({ role }: { role: string }) {
       </CardContent>
     </Card>
 
-    <SiteControlTable rows={rows} gm={gm} />
-    {gm ? <Timeline rows={rows} /> : null}
+    <SiteControlTable rows={visibleRows} gm={gm} />
+    {gm ? <Timeline rows={visibleRows} /> : null}
 
     <div className="flex flex-wrap gap-2">
       <Button variant="outline" onClick={() => navigate("/site-performance")}>Site comparison</Button>

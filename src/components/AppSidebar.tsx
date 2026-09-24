@@ -1,8 +1,6 @@
-import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAppContext } from "@/contexts/AppContext";
-import { useAuth, rankOf, ROLE_LABEL } from "@/contexts/AuthContext";
-import { useCanteens } from "@/hooks/useSupabaseData";
+import { useAuth, ROLE_LABEL } from "@/contexts/AuthContext";
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -30,30 +28,20 @@ import {
   FileUp,
   Target,
 } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import UnitSwitcher from "@/components/UnitSwitcher";
 
 import { navFor } from "@/lib/navigation";
 
 export default function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { selectedCanteen, setSelectedCanteen, sidebarOpen, setSidebarOpen } = useAppContext();
+  const { sidebarOpen, setSidebarOpen } = useAppContext();
   const { roleData, user, signOut } = useAuth();
-  const { data: canteens } = useCanteens();
 
   // A link shows only if this exact role is on its list — no inheriting a
   // screen just for outranking someone.
-  const myRank = rankOf(roleData?.role);
   const navItems = navFor(roleData?.role);
-
-  // Managers and cashiers are scoped to one canteen — lock the app to it
-  // instead of leaving them on the useless "All Canteens" view.
-  useEffect(() => {
-    if (roleData?.canteen_id && selectedCanteen === "all") {
-      setSelectedCanteen(roleData.canteen_id);
-    }
-  }, [roleData?.canteen_id, selectedCanteen, setSelectedCanteen]);
 
   const handleSignOut = async () => {
     await signOut();
@@ -104,21 +92,7 @@ export default function AppSidebar() {
             outrank: a chef cooking for three Eicher units was pinned to the
             first one and had no way to switch, so a menu published on unit 2
             sent them a notification for a screen that could never show it. */}
-        {(myRank >= rankOf("unit_manager") || (canteens?.length ?? 0) > 1) && (
-          <div className="px-4 py-3">
-            <Select value={selectedCanteen} onValueChange={setSelectedCanteen}>
-              <SelectTrigger className="bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground text-xs h-9">
-                <SelectValue placeholder="Select canteen" />
-              </SelectTrigger>
-              <SelectContent>
-                {myRank >= rankOf("admin") && <SelectItem value="all">All Sites</SelectItem>}
-                {canteens?.map((c: any) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+        <div className="px-4 py-3"><UnitSwitcher variant="sidebar" /></div>
 
         <nav className="flex-1 min-h-0 px-3 py-2 overflow-y-auto overscroll-contain space-y-0.5">
           {navItems.map((item) => {

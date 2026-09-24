@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useCallback, useContext, useState } from "react";
 
 interface AppContextType {
   selectedCanteen: string;
@@ -8,9 +8,27 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+const SELECTED_UNIT_KEY = "slp-selected-unit-v1";
+
+function readSelectedUnit() {
+  if (typeof window === "undefined") return "all";
+  try {
+    return window.localStorage.getItem(SELECTED_UNIT_KEY) || "all";
+  } catch {
+    return "all";
+  }
+}
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [selectedCanteen, setSelectedCanteen] = useState("all");
+  const [selectedCanteen, setSelectedCanteenState] = useState(readSelectedUnit);
+  const setSelectedCanteen = useCallback((id: string) => {
+    setSelectedCanteenState(id);
+    try {
+      window.localStorage.setItem(SELECTED_UNIT_KEY, id);
+    } catch {
+      // Browsers can disable storage; the current session still keeps working.
+    }
+  }, []);
   // Open on a desktop, where it is a fixed column and the page is inset to
   // make room for it. Closed on a phone, where it is an overlay 256px wide
   // across a 390px screen — starting it open put it, and its z-50, on top of
