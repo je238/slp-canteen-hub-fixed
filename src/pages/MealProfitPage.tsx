@@ -6,6 +6,7 @@ import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
 import { useIngredients } from "@/hooks/useSupabaseData";
 import { supabase } from "@/integrations/supabase/client";
+import { summarizeMealProfit, topProfitMenus } from "@/lib/mealProfitOverview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +24,9 @@ const mealLabel: Record<string, string> = {
   breakfast: "Breakfast", lunch: "Lunch", evening_snacks: "Evening Snacks",
   dinner: "Dinner", night_snacks: "Night Snacks",
 };
+const mealPeriods = ["breakfast", "lunch", "evening_snacks", "dinner", "night_snacks"];
+const percent = (value: number | null) => value == null ? "—" : `${number(value)}%`;
+const amountOrDash = (value: number | null) => value == null ? "—" : money(value);
 
 type NutritionForm = {
   id: string;
@@ -60,8 +64,7 @@ type MenuAnalysis = {
   carbohydrate_g_per_person?: number | null; fat_g_per_person?: number | null; fibre_g_per_person?: number | null;
   allocation_pct: number; dishes: DishAnalysis[];
 };
-type ProfitSummary = { revenue?: number; actual_food_cost?: number; dish_allocated_cost?: number; unallocated_cost?: number };
-type ProfitAnalysis = { summary: ProfitSummary; menus: MenuAnalysis[] };
+type ProfitAnalysis = { menus: MenuAnalysis[] };
 const optionalNumber = (value: string) => value.trim() === "" ? null : Number(value);
 
 function useMealProfitAnalysis(canteenId: string, from: string, to: string) {
@@ -90,9 +93,18 @@ export default function MealProfitPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [menuA, setMenuA] = useState("");
   const [menuB, setMenuB] = useState("");
+  const [mealFilter, setMealFilter] = useState("all");
+  const [menuSort, setMenuSort] = useState("date");
   const { data: ingredients = [], isLoading: ingredientsLoading } = useIngredients(selectedCanteen);
   const analysis = useMealProfitAnalysis(selectedCanteen, from, to);
   const menus = analysis.data?.menus || [];
+  const totals = summarizeMealProfit(menus);
+  const lunchTotals = summarizeMealProfit(menus.filter((menu) => menu.meal_period === "lunch"));
+  const topMenus = topProfitMenus(menus);
+  const visibleMenus = menus.filter((menu) => mealFilter === "all" || menu.meal_period === mealFilter)
+    .sort((a, b) => menuSort === "profit"
+      ? Number(b.gross_margin) - Number(a.gross_margin)
+      : b.menu_date.localeCompare(a.menu_date) || mealPeriods.indexOf(a.meal_period) - mealPeriods.indexOf(b.meal_period));
 
   const visibleIngredients = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -151,8 +163,8 @@ export default function MealProfitPage() {
       <div className="space-y-4">
         <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-lg font-bold">Cost, nutrition aur menu comparison</h2>
-            <p className="text-xs text-muted-foreground">Actual FIFO issue cost ÷ actual unique diners. Recipe missing ho to cost unallocated dikhega.</p>
+            <h2 className="text-lg font-bold">Menu profit aur food cost</h2>
+            <p className="text-xs text-muted-foreground">Selected dates ke menus, meal-wise average, dishes aur profit ek jagah. Final count na ho to estimate alag dikhaya hai.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <label className="space-y-1 text-xs"><span className="text-muted-foreground">From</span><Input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="h-9" /></label>
@@ -166,7 +178,7 @@ export default function MealProfitPage() {
           <Tabs defaultValue="allocation" className="space-y-4">
             <TabsList className="grid h-auto w-full grid-cols-3">
               <TabsTrigger value="nutrition" className="text-xs sm:text-sm">Nutrition Master</TabsTrigger>
-              <TabsTrigger value="allocation" className="text-xs sm:text-sm">Cost Allocation</TabsTrigger>
+              <TabsTrigger value="allocation" className="text-xs sm:text-sm">Menu Profit</TabsTrigger>
               <TabsTrigger value="comparison" className="text-xs sm:text-sm">Menu Comparison</TabsTrigger>
             </TabsList>
 
@@ -195,21 +207,37 @@ export default function MealProfitPage() {
             </TabsContent>
 
             <TabsContent value="allocation" className="space-y-3">
-              <SummaryCards summary={analysis.data?.summary} />
-              {analysis.isLoading ? <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Cost allocation load ho raha hai…</CardContent></Card> :
-                !menus.length ? <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Selected dates me published menu nahi hai.</CardContent></Card> :
-                menus.map((menu) => {
+              {analysis.isLoading ? <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Menu profit load ho raha hai…</CardContent></Card> :
+                !menus.length ? <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Selected dates me published menu nahi hai.</CardContent></Card> : <>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <Summary label="Sab menus ka avg food cost / person" value={amountOrDash(totals.costPerPerson)} detail={`${totals.menuCount} menus · ${number(totals.diners, 0)} diners`} />
+                  <Summary label="Lunch avg food cost / person" value={amountOrDash(lunchTotals.costPerPerson)} detail={`${lunchTotals.menuCount} lunch menus · ${number(lunchTotals.diners, 0)} diners`} />
+                  <Summary label="Food cost % · sab menus" value={percent(totals.foodCostPercent)} detail={`${money(totals.foodCost)} cost ÷ ${money(totals.revenue)} sale`} />
+                  <Summary label="Gross profit · sab menus" value={money(totals.profit)} detail="Sale − actual issued food cost" />
+                </div>
+                {totals.provisionalCount > 0 && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{totals.provisionalCount} menu(s) mein actual diners pending hain. Unke numbers expected count par based estimate hain; final profit ranking mein unhe nahi rakha hai.</p>}
+                <Card><CardHeader className="pb-2"><CardTitle className="text-base">Meal-wise average · {from} se {to}</CardTitle><p className="text-xs text-muted-foreground">Har meal ka average food cost = us meal ki total actual issue cost ÷ total diners. Yeh menu averages ka simple mean nahi hai.</p></CardHeader>
+                  <CardContent className="overflow-x-auto p-0"><Table className="min-w-[44rem]"><TableHeader><TableRow><TableHead>Meal</TableHead><TableHead className="text-right">Menus</TableHead><TableHead className="text-right">Diners</TableHead><TableHead className="text-right">Avg cost / person</TableHead><TableHead className="text-right">Food cost %</TableHead><TableHead className="text-right">Gross profit</TableHead></TableRow></TableHeader><TableBody>
+                    {mealPeriods.map((period) => { const row = summarizeMealProfit(menus.filter((menu) => menu.meal_period === period)); return <TableRow key={period} className={period === "lunch" ? "bg-orange-50/60" : ""}><TableCell className="font-semibold">{mealLabel[period]}</TableCell><TableCell className="text-right">{row.menuCount}</TableCell><TableCell className="text-right">{number(row.diners, 0)}</TableCell><TableCell className="text-right font-semibold">{amountOrDash(row.costPerPerson)}</TableCell><TableCell className="text-right">{percent(row.foodCostPercent)}</TableCell><TableCell className={`text-right font-semibold ${row.profit < 0 ? "text-destructive" : "text-emerald-700"}`}>{row.menuCount ? money(row.profit) : "—"}</TableCell></TableRow>; })}
+                  </TableBody></Table></CardContent>
+                </Card>
+                <Card><CardHeader className="pb-2"><CardTitle className="text-base">Sabse zyada gross profit wale menus</CardTitle><p className="text-xs text-muted-foreground">Sirf final diner count aur sale wale menus. Gross profit = sale − actual issued food cost; overheads isme shamil nahi hain.</p></CardHeader><CardContent>
+                  {topMenus.length ? <div className="grid gap-2 lg:grid-cols-3">{topMenus.map((menu, index) => <button type="button" key={menu.menu_plan_id} onClick={() => { setMealFilter("all"); setMenuSort("profit"); setExpanded(menu.menu_plan_id); }} className="rounded-lg border p-3 text-left hover:bg-muted/40"><p className="text-xs text-muted-foreground">#{index + 1} · {menu.menu_date} · {mealLabel[menu.meal_period] || menu.meal_period}</p><p className={`text-lg font-bold ${Number(menu.gross_margin) < 0 ? "text-destructive" : "text-emerald-700"}`}>{money(menu.gross_margin)}</p><p className="line-clamp-2 text-xs text-muted-foreground">{menu.dishes?.map((dish) => dish.dish_name).join(" + ") || "Dishes pending"}</p></button>)}</div> : <p className="text-sm text-muted-foreground">Final count aur sale wale menu abhi nahi hain.</p>}
+                </CardContent></Card>
+                <div className="flex flex-wrap items-end justify-between gap-2 pt-2"><div><h3 className="font-semibold">Date-wise menu detail</h3><p className="text-xs text-muted-foreground">Menu mein kya tha, cost aur profit dekhein. Dish-wise breakup ke liye menu kholen.</p></div><div className="flex flex-wrap gap-2"><Select value={mealFilter} onValueChange={setMealFilter}><SelectTrigger className="w-40" aria-label="Meal filter"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All meals</SelectItem>{mealPeriods.map((period) => <SelectItem key={period} value={period}>{mealLabel[period]}</SelectItem>)}</SelectContent></Select><Select value={menuSort} onValueChange={setMenuSort}><SelectTrigger className="w-40" aria-label="Menu sort"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="date">Latest date</SelectItem><SelectItem value="profit">Highest profit</SelectItem></SelectContent></Select></div></div>
+                {visibleMenus.map((menu) => {
                   const open = expanded === menu.menu_plan_id;
                   return <Card key={menu.menu_plan_id} className="overflow-hidden">
-                    <button type="button" onClick={() => setExpanded(open ? null : menu.menu_plan_id)} className="flex w-full items-center gap-3 p-4 text-left hover:bg-muted/40">
-                      <div className="min-w-0 flex-1"><p className="font-semibold">{menu.menu_date} · {mealLabel[menu.meal_period] || menu.meal_period}</p><p className="text-xs text-muted-foreground">{number(menu.diner_count, 0)} diners · {menu.provisional ? "expected count" : "actual unique count"}</p></div>
-                      <div className="hidden gap-5 text-right sm:flex"><Metric label="ACTUAL COST" value={money(menu.actual_food_cost)} /><Metric label="PER PERSON" value={money(menu.cost_per_person)} /><Metric label="ALLOCATED" value={`${number(menu.allocation_pct)}%`} /></div>
-                      <Badge variant={Number(menu.allocation_pct) >= 99.9 ? "default" : "outline"}>{Number(menu.allocation_pct) >= 99.9 ? "Complete" : "Recipe pending"}</Badge>
-                      <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+                    <button type="button" aria-expanded={open} onClick={() => setExpanded(open ? null : menu.menu_plan_id)} className="w-full p-4 text-left hover:bg-muted/40">
+                      <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><p className="font-semibold">{menu.menu_date} · {mealLabel[menu.meal_period] || menu.meal_period}</p><p className="mt-1 text-sm">{menu.dishes?.map((dish) => dish.dish_name).join(" + ") || "Dishes pending"}</p><p className="mt-1 text-xs text-muted-foreground">{number(menu.diner_count, 0)} diners · {menu.provisional ? "Expected count — estimate" : "Actual count"}</p></div><Badge variant={menu.provisional ? "outline" : "default"}>{menu.provisional ? "Provisional" : "Final"}</Badge><ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} /></div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 border-t pt-3 text-left sm:grid-cols-3 lg:grid-cols-6"><Metric label="COST / PERSON" value={menu.diner_count > 0 ? money(menu.cost_per_person) : "—"} /><Metric label="FOOD COST %" value={Number(menu.revenue) > 0 ? percent(Number(menu.actual_food_cost) * 100 / Number(menu.revenue)) : "—"} /><Metric label="SALE" value={money(menu.revenue)} /><Metric label="ACTUAL FOOD COST" value={money(menu.actual_food_cost)} /><Metric label="GROSS PROFIT" value={money(menu.gross_margin)} /><Metric label="RECIPE ALLOCATED" value={`${number(menu.allocation_pct)}%`} /></div>
                     </button>
                     {open && <div className="overflow-x-auto border-t"><DishTable dishes={menu.dishes || []} provisional={menu.provisional} /></div>}
                   </Card>;
                 })}
+                {!visibleMenus.length && <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Is meal ke menus selected dates mein nahi hain.</CardContent></Card>}
+                <p className="text-xs text-muted-foreground">Dish allocation recipe ke basis par hai; recipe missing ho to us dish ka allocated cost incomplete ho sakta hai. Menu ka total food cost actual issue − return se liya gaya hai.</p>
+              </>}
             </TabsContent>
 
             <TabsContent value="comparison" className="space-y-4">
@@ -242,17 +270,8 @@ export default function MealProfitPage() {
   );
 }
 
-function SummaryCards({ summary = {} }: { summary?: ProfitSummary }) {
-  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-    <Summary label="Meal revenue" value={money(summary.revenue)} />
-    <Summary label="Actual FIFO food cost" value={money(summary.actual_food_cost)} />
-    <Summary label="Dish allocated" value={money(summary.dish_allocated_cost)} />
-    <Summary label="Unallocated / recipe missing" value={money(summary.unallocated_cost)} warning={Math.abs(Number(summary.unallocated_cost || 0)) > 0.01} />
-  </div>;
-}
-
-function Summary({ label, value, warning }: { label: string; value: string; warning?: boolean }) {
-  return <Card className={warning ? "border-warning/50" : ""}><CardContent className="p-4"><p className="text-xs text-muted-foreground">{label}</p><p className={`text-xl font-bold ${warning ? "text-warning" : ""}`}>{value}</p></CardContent></Card>;
+function Summary({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl font-bold">{value}</p><p className="mt-1 text-xs text-muted-foreground">{detail}</p></CardContent></Card>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
