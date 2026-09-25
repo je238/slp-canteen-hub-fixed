@@ -2,11 +2,13 @@ import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, subDays } from "date-fns";
 import { ChevronDown, CircleAlert, Pencil, Scale, Search } from "lucide-react";
+import { Link } from "react-router-dom";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
 import { useIngredients } from "@/hooks/useSupabaseData";
+import { useSiteBudgets } from "@/hooks/useSrsData";
 import { supabase } from "@/integrations/supabase/client";
-import { hasCompleteMealCost, summarizeMealProfit, topProfitMenus } from "@/lib/mealProfitOverview";
+import { getMenuSignal, hasCompleteMealCost, marginPerPerson, rankMenusByMarginPerPerson, summarizeMealProfit, type MenuSignal } from "@/lib/mealProfitOverview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -95,15 +97,30 @@ export default function MealProfitPage() {
   const [menuB, setMenuB] = useState("");
   const [mealFilter, setMealFilter] = useState("all");
   const [menuSort, setMenuSort] = useState("date");
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const { data: ingredients = [], isLoading: ingredientsLoading } = useIngredients(selectedCanteen);
+  const budgets = useSiteBudgets(selectedCanteen);
   const analysis = useMealProfitAnalysis(selectedCanteen, from, to);
   const menus = analysis.data?.menus || [];
   const totals = summarizeMealProfit(menus);
   const lunchTotals = summarizeMealProfit(menus.filter((menu) => menu.meal_period === "lunch"));
-  const topMenus = topProfitMenus(menus);
-  const visibleMenus = menus.filter((menu) => mealFilter === "all" || menu.meal_period === mealFilter)
-    .sort((a, b) => menuSort === "profit"
-      ? Number(b.gross_margin) - Number(a.gross_margin)
+  const bestMenus = rankMenusByMarginPerPerson(menus, "best");
+  const worstMenus = rankMenusByMarginPerPerson(menus, "worst");
+  const budgetTargets = new Map<string, number>((budgets.data || [])
+    .filter((budget) => budget.food_cost_pct != null && Number(budget.food_cost_pct) > 0)
+    .map((budget) => [String(budget.budget_month).slice(0, 7), Number(budget.food_cost_pct)]));
+  const targetForDate = (date: string) => budgetTargets.get(date.slice(0, 7)) ?? null;
+  const menuSignal = (menu: MenuAnalysis) => getMenuSignal(menu, targetForDate(menu.menu_date));
+  const redCount = menus.filter((menu) => ["loss", "over_target"].includes(menuSignal(menu))).length;
+  const noTargetCount = menus.filter((menu) => hasCompleteMealCost(menu) && targetForDate(menu.menu_date) == null).length;
+  const missingCostCount = menus.filter((menu) => !menu.provisional && Number(menu.actual_food_cost) <= 0).length;
+  const missingSaleCount = menus.filter((menu) => !menu.provisional && Number(menu.revenue) <= 0).length;
+  const recipePendingCount = menus.filter((menu) => hasCompleteMealCost(menu) && Number(menu.allocation_pct) < 99.9).length;
+  const visibleMenus = menus.filter((menu) =>
+    (mealFilter === "all" || menu.meal_period === mealFilter) &&
+    (ownerFilter === "all" || ownerFilter === "red" && ["loss", "over_target"].includes(menuSignal(menu)) || ownerFilter === "pending" && menuSignal(menu) === "pending"))
+    .sort((a, b) => menuSort === "margin"
+      ? (marginPerPerson(b) ?? -Infinity) - (marginPerPerson(a) ?? -Infinity)
       : b.menu_date.localeCompare(a.menu_date) || mealPeriods.indexOf(a.meal_period) - mealPeriods.indexOf(b.meal_period));
 
   const visibleIngredients = useMemo(() => {
@@ -163,8 +180,8 @@ export default function MealProfitPage() {
       <div className="space-y-4">
         <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-lg font-bold">Menu profit aur food cost</h2>
-            <p className="text-xs text-muted-foreground">Selected dates ke menus, meal-wise average, dishes aur profit ek jagah. Final count na ho to estimate alag dikhaya hai.</p>
+            <h2 className="text-lg font-bold">Owner menu performance</h2>
+            <p className="text-xs text-muted-foreground">Kis menu par margin achha hai, kahan food cost target cross hua, aur kis entry ka data pending hai.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <label className="space-y-1 text-xs"><span className="text-muted-foreground">From</span><Input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="h-9" /></label>
@@ -209,35 +226,42 @@ export default function MealProfitPage() {
             <TabsContent value="allocation" className="space-y-3">
               {analysis.isLoading ? <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Menu profit load ho raha hai…</CardContent></Card> :
                 !menus.length ? <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Selected dates me published menu nahi hai.</CardContent></Card> : <>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <Summary label="Avg food cost / actual person" value={amountOrDash(totals.costPerPerson)} detail={`${totals.menuCount}/${totals.totalMenuCount} complete menus · ${number(totals.diners, 0)} actual diners`} />
-                  <Summary label="Lunch avg / actual person" value={amountOrDash(lunchTotals.costPerPerson)} detail={`${lunchTotals.menuCount}/${lunchTotals.totalMenuCount} complete lunches · ${number(lunchTotals.diners, 0)} actual diners`} />
-                  <Summary label="Food cost % · complete menus" value={percent(totals.foodCostPercent)} detail={`${money(totals.foodCost)} cost ÷ ${money(totals.revenue)} sale`} />
-                  <Summary label="Gross profit · complete menus" value={totals.menuCount ? money(totals.profit) : "—"} detail="Sale − actual issued food cost" />
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <Summary label="Meal sale · complete data" value={totals.menuCount ? money(totals.revenue) : "—"} detail={`${totals.menuCount}/${totals.totalMenuCount} menus included`} />
+                  <Summary label="Food cost %" value={percent(totals.foodCostPercent)} detail={`${money(totals.foodCost)} issue cost ÷ ${money(totals.revenue)} sale`} />
+                  <Summary label="Gross margin (net profit nahi)" value={totals.menuCount ? money(totals.profit) : "—"} detail="Sale − food cost; salary/expenses excluded" />
+                  <Summary label="Avg food cost / actual person" value={amountOrDash(totals.costPerPerson)} detail={`${number(totals.diners, 0)} actual diners · weighted average`} />
+                  <Summary label="Lunch avg / actual person" value={amountOrDash(lunchTotals.costPerPerson)} detail={`${lunchTotals.menuCount}/${lunchTotals.totalMenuCount} complete lunches`} />
+                  <Summary label="Data completeness" value={`${totals.menuCount}/${totals.totalMenuCount}`} detail={`${totals.pendingCount} pending · ${recipePendingCount} dish recipe allocation pending`} />
                 </div>
-                {totals.pendingCount > 0 && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{totals.pendingCount} menu(s) average aur profit ranking se bahar hain: actual diners ya positive food cost available nahi hai. Inmein {totals.provisionalCount} ka actual diner count pending hai. Menu card par reason dekhein.</p>}
+                <Card className={redCount ? "border-red-200 bg-red-50/50" : ""}><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">Owner attention</p><p className="text-sm text-muted-foreground">{redCount} red flags · {totals.pendingCount} pending menus · {totals.provisionalCount} actual counts pending · {missingCostCount} food costs missing/zero · {missingSaleCount} sales missing/zero</p><p className="mt-1 text-xs text-muted-foreground">Red flag = gross loss ya us date ke saved monthly food-cost target se upar. Target na ho to sirf loss flag hota hai.</p></div><div className="flex gap-2"><Button size="sm" variant={ownerFilter === "red" ? "destructive" : "outline"} onClick={() => setOwnerFilter("red")}>Red alerts ({redCount})</Button><Button size="sm" variant={ownerFilter === "pending" ? "secondary" : "outline"} onClick={() => setOwnerFilter("pending")}>Pending ({totals.pendingCount})</Button></div></CardContent></Card>
+                {budgets.isError && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Monthly food-cost target load nahi hua. Target-based red alerts abhi incomplete ho sakte hain; loss aur pending alerts dikh rahe hain.</p>}
+                {!budgets.isLoading && !budgets.isError && noTargetCount > 0 && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{noTargetCount} complete menus ke month ka food-cost target set nahi hai, isliye un par target-cross alert nahi ban sakta. <Link to="/budgets" className="font-semibold underline">Budgets mein monthly target dekhein</Link>.</p>}
                 <Card><CardHeader className="pb-2"><CardTitle className="text-base">Meal-wise average · {from} se {to}</CardTitle><p className="text-xs text-muted-foreground">Sirf actual diners aur positive issue cost wale menus. Average = un menus ki total food cost ÷ unhi menus ke total actual diners.</p></CardHeader>
                   <CardContent className="overflow-x-auto p-0"><Table className="min-w-[44rem]"><TableHeader><TableRow><TableHead>Meal</TableHead><TableHead className="text-right">Menus</TableHead><TableHead className="text-right">Diners</TableHead><TableHead className="text-right">Avg cost / person</TableHead><TableHead className="text-right">Food cost %</TableHead><TableHead className="text-right">Gross profit</TableHead></TableRow></TableHeader><TableBody>
                     {mealPeriods.map((period) => { const row = summarizeMealProfit(menus.filter((menu) => menu.meal_period === period)); return <TableRow key={period} className={period === "lunch" ? "bg-orange-50/60" : ""}><TableCell className="font-semibold">{mealLabel[period]}</TableCell><TableCell className="text-right">{row.menuCount}/{row.totalMenuCount}</TableCell><TableCell className="text-right">{number(row.diners, 0)}</TableCell><TableCell className="text-right font-semibold">{amountOrDash(row.costPerPerson)}</TableCell><TableCell className="text-right">{percent(row.foodCostPercent)}</TableCell><TableCell className={`text-right font-semibold ${row.profit < 0 ? "text-destructive" : "text-emerald-700"}`}>{row.menuCount ? money(row.profit) : "—"}</TableCell></TableRow>; })}
                   </TableBody></Table></CardContent>
                 </Card>
-                <Card><CardHeader className="pb-2"><CardTitle className="text-base">Sabse zyada gross profit wale menus</CardTitle><p className="text-xs text-muted-foreground">Sirf actual diners aur positive food cost wale menus. Gross profit = sale − actual issued food cost; overheads isme shamil nahi hain.</p></CardHeader><CardContent>
-                  {topMenus.length ? <div className="grid gap-2 lg:grid-cols-3">{topMenus.map((menu, index) => <button type="button" key={menu.menu_plan_id} onClick={() => { setMealFilter("all"); setMenuSort("profit"); setExpanded(menu.menu_plan_id); }} className="rounded-lg border p-3 text-left hover:bg-muted/40"><p className="text-xs text-muted-foreground">#{index + 1} · {menu.menu_date} · {mealLabel[menu.meal_period] || menu.meal_period}</p><p className={`text-lg font-bold ${Number(menu.gross_margin) < 0 ? "text-destructive" : "text-emerald-700"}`}>{money(menu.gross_margin)}</p><p className="line-clamp-2 text-xs text-muted-foreground">{menu.dishes?.map((dish) => dish.dish_name).join(" + ") || "Dishes pending"}</p></button>)}</div> : <p className="text-sm text-muted-foreground">Final count aur sale wale menu abhi nahi hain.</p>}
-                </CardContent></Card>
-                <div className="flex flex-wrap items-end justify-between gap-2 pt-2"><div><h3 className="font-semibold">Date-wise menu detail</h3><p className="text-xs text-muted-foreground">Menu mein kya tha, cost aur profit dekhein. Dish-wise breakup ke liye menu kholen.</p></div><div className="flex flex-wrap gap-2"><Select value={mealFilter} onValueChange={setMealFilter}><SelectTrigger className="w-40" aria-label="Meal filter"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All meals</SelectItem>{mealPeriods.map((period) => <SelectItem key={period} value={period}>{mealLabel[period]}</SelectItem>)}</SelectContent></Select><Select value={menuSort} onValueChange={setMenuSort}><SelectTrigger className="w-40" aria-label="Menu sort"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="date">Latest date</SelectItem><SelectItem value="profit">Highest profit</SelectItem></SelectContent></Select></div></div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <RankedMenus title="Best margin / person" menus={bestMenus} tone="good" onSelect={(menu) => { setOwnerFilter("all"); setMealFilter("all"); setMenuSort("margin"); setExpanded(menu.menu_plan_id); }} />
+                  <RankedMenus title="Lowest margin / person" menus={worstMenus} tone="bad" onSelect={(menu) => { setOwnerFilter("all"); setMealFilter("all"); setMenuSort("margin"); setExpanded(menu.menu_plan_id); }} />
+                </div>
+                <div className="flex flex-wrap items-end justify-between gap-2 pt-2"><div><h3 className="font-semibold">Date-wise menu aur red flags</h3><p className="text-xs text-muted-foreground">Meal, dishes, ₹/person, target aur gross margin. Card kholkar dish-wise cost dekhein.</p></div><div className="flex flex-wrap gap-2"><Select value={ownerFilter} onValueChange={setOwnerFilter}><SelectTrigger className="w-36" aria-label="Status filter"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All status</SelectItem><SelectItem value="red">Red alerts</SelectItem><SelectItem value="pending">Pending data</SelectItem></SelectContent></Select><Select value={mealFilter} onValueChange={setMealFilter}><SelectTrigger className="w-40" aria-label="Meal filter"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All meals</SelectItem>{mealPeriods.map((period) => <SelectItem key={period} value={period}>{mealLabel[period]}</SelectItem>)}</SelectContent></Select><Select value={menuSort} onValueChange={setMenuSort}><SelectTrigger className="w-40" aria-label="Menu sort"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="date">Latest date</SelectItem><SelectItem value="margin">Margin / person</SelectItem></SelectContent></Select></div></div>
                 {visibleMenus.map((menu) => {
                   const open = expanded === menu.menu_plan_id;
                   const complete = hasCompleteMealCost(menu);
-                  return <Card key={menu.menu_plan_id} className="overflow-hidden">
+                  const signal = menuSignal(menu);
+                  const target = targetForDate(menu.menu_date);
+                  return <Card key={menu.menu_plan_id} className={`overflow-hidden ${signal === "loss" || signal === "over_target" ? "border-red-300 bg-red-50/30" : signal === "pending" ? "border-amber-200" : ""}`}>
                     <button type="button" aria-expanded={open} onClick={() => setExpanded(open ? null : menu.menu_plan_id)} className="w-full p-4 text-left hover:bg-muted/40">
-                      <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><p className="font-semibold">{menu.menu_date} · {mealLabel[menu.meal_period] || menu.meal_period}</p><p className="mt-1 text-sm">{menu.dishes?.map((dish) => dish.dish_name).join(" + ") || "Dishes pending"}</p><p className="mt-1 text-xs text-muted-foreground">{number(menu.diner_count, 0)} diners · {menu.provisional ? "Actual count pending; expected count shown" : "Actual count"}{Number(menu.actual_food_cost) <= 0 ? " · Food cost missing/zero" : ""}</p></div><Badge variant={complete ? "default" : "outline"}>{complete ? "Complete" : "Pending"}</Badge><ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} /></div>
-                      <div className="mt-3 grid grid-cols-2 gap-2 border-t pt-3 text-left sm:grid-cols-3 lg:grid-cols-6"><Metric label="COST / PERSON" value={complete ? money(menu.cost_per_person) : "—"} /><Metric label="FOOD COST %" value={complete && Number(menu.revenue) > 0 ? percent(Number(menu.actual_food_cost) * 100 / Number(menu.revenue)) : "—"} /><Metric label="SALE" value={money(menu.revenue)} /><Metric label="ACTUAL FOOD COST" value={Number(menu.actual_food_cost) > 0 ? money(menu.actual_food_cost) : "—"} /><Metric label="GROSS PROFIT" value={complete ? money(menu.gross_margin) : "—"} /><Metric label="RECIPE ALLOCATED" value={`${number(menu.allocation_pct)}%`} /></div>
+                      <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><p className="font-semibold">{menu.menu_date} · {mealLabel[menu.meal_period] || menu.meal_period}</p><p className="mt-1 text-sm">{menu.dishes?.map((dish) => dish.dish_name).join(" + ") || "Dishes pending"}</p><p className="mt-1 text-xs text-muted-foreground">{number(menu.diner_count, 0)} diners · {menu.provisional ? "Actual count pending; expected count shown" : "Actual count"}{Number(menu.actual_food_cost) <= 0 ? " · Food cost missing/zero" : ""}{Number(menu.revenue) <= 0 ? " · Sale/rate missing" : ""}</p></div><SignalBadge signal={signal} /><ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} /></div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 border-t pt-3 text-left sm:grid-cols-3 lg:grid-cols-7"><Metric label="COST / PERSON" value={complete ? money(menu.cost_per_person) : "—"} /><Metric label="FOOD COST %" value={complete && Number(menu.revenue) > 0 ? percent(Number(menu.actual_food_cost) * 100 / Number(menu.revenue)) : "—"} /><Metric label="MONTHLY TARGET" value={target == null ? "Not set" : percent(target)} /><Metric label="SALE" value={complete ? money(menu.revenue) : "—"} /><Metric label="ISSUED FOOD COST" value={Number(menu.actual_food_cost) > 0 ? money(menu.actual_food_cost) : "—"} /><Metric label="GROSS MARGIN / PERSON" value={amountOrDash(marginPerPerson(menu))} /><Metric label="RECIPE ALLOCATED" value={`${number(menu.allocation_pct)}%`} /></div>
                     </button>
                     {open && <div className="overflow-x-auto border-t"><DishTable dishes={menu.dishes || []} provisional={menu.provisional} /></div>}
                   </Card>;
                 })}
-                {!visibleMenus.length && <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Is meal ke menus selected dates mein nahi hain.</CardContent></Card>}
-                <p className="text-xs text-muted-foreground">Dish allocation recipe ke basis par hai; recipe missing ho to us dish ka allocated cost incomplete ho sakta hai. Menu ka total food cost actual issue − return se liya gaya hai.</p>
+                {!visibleMenus.length && <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Is filter mein koi menu nahi hai.</CardContent></Card>}
+                <p className="text-xs text-muted-foreground">Gross margin = meal sale − actual issue (returns minus). Salary, rent aur other expenses included nahi hain. Dish allocation recipe-based hai; recipe pending hone par dish cost incomplete ho sakta hai.</p>
               </>}
             </TabsContent>
 
@@ -273,6 +297,22 @@ export default function MealProfitPage() {
 
 function Summary({ label, value, detail }: { label: string; value: string; detail: string }) {
   return <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-xl font-bold">{value}</p><p className="mt-1 text-xs text-muted-foreground">{detail}</p></CardContent></Card>;
+}
+
+function SignalBadge({ signal }: { signal: MenuSignal }) {
+  const labels: Record<MenuSignal, string> = {
+    pending: "Data pending", loss: "Gross loss", over_target: "Above target",
+    within_target: "Within target", no_target: "Target not set",
+  };
+  return <Badge variant={signal === "loss" || signal === "over_target" ? "destructive" : "outline"} className="shrink-0">{labels[signal]}</Badge>;
+}
+
+function RankedMenus({ title, menus, tone, onSelect }: {
+  title: string; menus: MenuAnalysis[]; tone: "good" | "bad"; onSelect: (menu: MenuAnalysis) => void;
+}) {
+  return <Card><CardHeader className="pb-2"><CardTitle className="text-base">{title}</CardTitle><p className="text-xs text-muted-foreground">Same-size comparison: gross margin ÷ actual diners. Sirf complete data wale menus.</p></CardHeader><CardContent className="space-y-2">
+    {menus.length ? menus.map((menu, index) => <button type="button" key={menu.menu_plan_id} onClick={() => onSelect(menu)} className="flex w-full items-start gap-3 rounded-lg border p-3 text-left hover:bg-muted/40"><span className="text-xs font-semibold text-muted-foreground">#{index + 1}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold">{menu.menu_date} · {mealLabel[menu.meal_period] || menu.meal_period}</span><span className="mt-1 block line-clamp-2 text-xs text-muted-foreground">{menu.dishes?.map((dish) => dish.dish_name).join(" + ") || "Dishes pending"}</span></span><span className={`shrink-0 text-right text-sm font-bold ${tone === "bad" && Number(menu.gross_margin) < 0 ? "text-destructive" : "text-emerald-700"}`}>{money(marginPerPerson(menu))}<span className="block text-[10px] font-normal text-muted-foreground">per person</span></span></button>) : <p className="text-sm text-muted-foreground">Complete menu data abhi nahi hai.</p>}
+  </CardContent></Card>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
