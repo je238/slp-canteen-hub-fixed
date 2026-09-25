@@ -20,15 +20,29 @@ describe("meal profit overview", () => {
   it("keeps missing diners and revenue as unavailable instead of zero percent", () => {
     const totals = summarizeMealProfit([menu({ provisional: true, actual_food_cost: 50 })]);
     expect(totals.provisionalCount).toBe(1);
+    expect(totals.pendingCount).toBe(1);
     expect(totals.costPerPerson).toBeNull();
     expect(totals.foodCostPercent).toBeNull();
+  });
+
+  it("excludes future estimates and zero-cost menus from the average", () => {
+    const totals = summarizeMealProfit([
+      menu({ menu_plan_id: "complete", diner_count: 100, actual_food_cost: 2000, revenue: 5000, gross_margin: 3000 }),
+      menu({ menu_plan_id: "no-issue", diner_count: 1000, actual_food_cost: 0, revenue: 50000, gross_margin: 50000 }),
+      menu({ menu_plan_id: "expected", diner_count: 1000, provisional: true, actual_food_cost: 100, revenue: 50000, gross_margin: 49900 }),
+    ]);
+    expect(totals.totalMenuCount).toBe(3);
+    expect(totals.menuCount).toBe(1);
+    expect(totals.pendingCount).toBe(2);
+    expect(totals.costPerPerson).toBe(20);
+    expect(totals.profit).toBe(3000);
   });
 
   it("ranks only menus with final diner counts and positive sale", () => {
     const result = topProfitMenus([
       menu({ menu_plan_id: "estimate", provisional: true, revenue: 1000, gross_margin: 900 }),
-      menu({ menu_plan_id: "final", revenue: 500, gross_margin: 200 }),
-      menu({ menu_plan_id: "no-sale", revenue: 0, gross_margin: 500 }),
+      menu({ menu_plan_id: "final", diner_count: 10, actual_food_cost: 300, revenue: 500, gross_margin: 200 }),
+      menu({ menu_plan_id: "no-sale", diner_count: 10, actual_food_cost: 100, revenue: 0, gross_margin: 500 }),
     ]);
     expect(result.map((row) => row.menu_plan_id)).toEqual(["final"]);
   });
