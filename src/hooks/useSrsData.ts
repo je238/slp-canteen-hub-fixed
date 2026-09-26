@@ -178,10 +178,8 @@ export function useSaveMenuPlan() {
         return data;
       }
 
-      // HS owns menu entry. Insert a new menu as a draft first, add its dish
-      // lines, and only then publish it. This keeps the database rule honest:
-      // HS may build draft lines, while a published-menu change is reserved
-      // for Manager correction.
+      // HS or Manager can enter a menu. Insert it as a draft first, add its
+      // dishes, and only then publish it so a partial menu never reaches Chef.
       const publishing = fields.status === "published";
       const initialFields = publishing
         ? { ...fields, status: "draft", published_at: null }

@@ -427,7 +427,7 @@ export default function MenuPlanningPage() {
                         </div>
                       </div>
                     )}
-                    {!isPast && ((isHeadSupervisor && (!plan || plan.status === "draft")) || (isManagerOrAbove && !!plan)) && (
+                    {!isPast && ((isHeadSupervisor && (!plan || plan.status === "draft")) || isManagerOrAbove) && (
                       <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => openEditor(mp.value)}>
                         {plan ? (plan.status === "published" ? "Manager correction" : "Edit menu") : "Plan this meal"}
                       </Button>
