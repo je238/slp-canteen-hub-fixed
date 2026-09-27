@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { canOpen } from "@/lib/navigation";
+import { formatAlertRate } from "@/lib/alertRate";
 
 const IMPORTANT_ACTIONS = [
   "stock_adjusted","rate_corrected","ingredient_renamed","ingredient_unit_changed","ingredient_removed","ingredient_merged",
@@ -110,6 +111,7 @@ export default function ExecutiveAlertsPage(){
       return found;
     };
     for(const row of raw.fraud){
+      const isPriceSpike=row.title==="Suspicious Price Spike";
       const purchase:any=row.purchase_id?purchaseById.get(row.purchase_id):null;
       const sameItemLines:any[]=(purchase?.purchase_items||[]).filter((line:any)=>line.ingredient_id===row.ingredient_id);
       const alertRate=Number(row.actual_value||0);
@@ -139,8 +141,8 @@ export default function ExecutiveAlertsPage(){
       out.push({
         key:`fraud-${row.id}`,source:"system",siteId:row.canteen_id,site:siteNames[row.canteen_id]||"Site",
         title:row.title,description:row.description||human(row.alert_type),severity:row.severity==="critical"?"critical":"warning",
-        status:row.status,at:row.created_at,oldValue:row.expected_value==null?undefined:String(row.expected_value),
-        newValue:row.actual_value==null?undefined:String(row.actual_value),reason:row.review_note||"Automatic control rule",
+        status:row.status,at:row.created_at,oldValue:row.expected_value==null?undefined:isPriceSpike?formatAlertRate(row.expected_value):String(row.expected_value),
+        newValue:row.actual_value==null?undefined:isPriceSpike?formatAlertRate(row.actual_value):String(row.actual_value),reason:row.review_note||"Automatic control rule",
         impact:Number(row.loss_value||0),reviewId:row.id,details,attachments,to:purchase?"/purchases":undefined,
         person:purchase?(users[purchase.created_by]||"Purchase entry user"):undefined,
       });
