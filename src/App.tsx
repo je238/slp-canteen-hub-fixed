@@ -148,7 +148,7 @@ const App = () => (
                   <ProtectedRoute minRole="ops_manager"><AuditLogPage /></ProtectedRoute>
                 } />
                 <Route path="/executive-alerts" element={
-                  <ProtectedRoute minRole="ops_manager"><ExecutiveAlertsPage /></ProtectedRoute>
+                  <ProtectedRoute minRole="unit_manager"><ExecutiveAlertsPage /></ProtectedRoute>
                 } />
 
                 {/* Vendors have exactly one screen */}

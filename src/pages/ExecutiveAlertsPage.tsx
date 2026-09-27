@@ -14,6 +14,8 @@ import { useCanteens, useUserDirectory } from "@/hooks/useSupabaseData";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useAppContext } from "@/contexts/AppContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { canOpen } from "@/lib/navigation";
 
 const IMPORTANT_ACTIONS = [
   "stock_adjusted","rate_corrected","ingredient_renamed","ingredient_unit_changed","ingredient_removed","ingredient_merged",
@@ -50,6 +52,7 @@ type FeedItem={
 
 export default function ExecutiveAlertsPage(){
   const {selectedCanteen}=useAppContext();
+  const {roleData}=useAuth();
   const [search,setSearch]=useState("");
   const [alertFilter,setAlertFilter]=useState<"all"|"critical">("all");
   const [review,setReview]=useState<FeedItem|null>(null);
@@ -290,7 +293,7 @@ export default function ExecutiveAlertsPage(){
   const reviewMutation=useMutation({mutationFn:async()=>{if(!review?.reviewId)throw new Error("This automatic alert is read-only");if(!reason.trim())throw new Error("Reason likhna zaroori hai");const {error}=await supabase.rpc("review_operational_alert" as any,{p_alert_id:review.reviewId,p_status:reviewStatus,p_reason:reason.trim()});if(error)throw error;},onSuccess:()=>{toast.success("Alert status audit ke saath save ho gaya");setReview(null);setReason("");qc.invalidateQueries({queryKey:["executiveExceptionSource"]});qc.invalidateQueries({queryKey:["executiveSiteDashboard"]});},onError:(e:any)=>toast.error(e.message)});
 
   return <AppLayout title="Executive Alerts"><div className="space-y-4 animate-fade-in">
-    <Card className="border-none shadow-sm"><CardContent className="p-4"><div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><p className="font-semibold">Owner / GM exception control</p><p className="text-xs text-muted-foreground">Human changes me written reason; automatic alerts me detection basis. Audit history delete nahi hoti.</p></div><div className="relative sm:w-80"><Search className="absolute left-3 top-3 w-4 h-4 text-muted-foreground"/><Input className="pl-9" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Site, item, reason, person search"/></div></div></CardContent></Card>
+    <Card className="border-none shadow-sm"><CardContent className="p-4"><div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><p className="font-semibold">Manager / Owner exception control</p><p className="text-xs text-muted-foreground">Human changes me written reason; automatic alerts me detection basis. Audit history delete nahi hoti.</p></div><div className="relative sm:w-80"><Search className="absolute left-3 top-3 w-4 h-4 text-muted-foreground"/><Input className="pl-9" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Site, item, reason, person search"/></div></div></CardContent></Card>
     <div className="grid grid-cols-3 gap-3"><Stat label="Critical" value={searched.filter(x=>x.severity==="critical").length} bad/><Stat label="Warning" value={searched.filter(x=>x.severity==="warning").length}/><Stat label="Audit records" value={searched.filter(x=>x.source==="audit").length}/></div>
     <div className="flex flex-wrap items-center gap-2">
       <Button variant={alertFilter==="all"?"default":"outline"} onClick={()=>setAlertFilter("all")} aria-pressed={alertFilter==="all"}>
@@ -306,7 +309,7 @@ export default function ExecutiveAlertsPage(){
       </Button>
       {alertFilter==="critical"?<span className="text-xs text-muted-foreground">Sirf critical red alerts dikh rahe hain</span>:null}
     </div>
-    {error?<Card><CardContent className="p-8 text-center text-destructive">Alerts load nahi hue.</CardContent></Card>:isLoading?<Card><CardContent className="p-8 text-center text-muted-foreground">Alerts load ho rahe hain…</CardContent></Card>:<div className="space-y-2">{visible.map(item=><AlertCard key={item.key} item={item} open={expanded.has(item.key)} onToggle={()=>setExpanded(prev=>{const next=new Set(prev);next.has(item.key)?next.delete(item.key):next.add(item.key);return next;})} onGo={item.to?()=>navigate(item.to!):undefined} onReview={item.reviewId?()=>{setReview(item);setReviewStatus("resolved");setReason("");}:undefined}/>)}</div>}
+    {error?<Card><CardContent className="p-8 text-center text-destructive">Alerts load nahi hue.</CardContent></Card>:isLoading?<Card><CardContent className="p-8 text-center text-muted-foreground">Alerts load ho rahe hain…</CardContent></Card>:<div className="space-y-2">{visible.map(item=><AlertCard key={item.key} item={item} open={expanded.has(item.key)} onToggle={()=>setExpanded(prev=>{const next=new Set(prev);next.has(item.key)?next.delete(item.key):next.add(item.key);return next;})} onGo={item.to&&canOpen(item.to,roleData.role)?()=>navigate(item.to!):undefined} onReview={item.reviewId?()=>{setReview(item);setReviewStatus("resolved");setReason("");}:undefined}/>)}</div>}
     <Dialog open={!!review} onOpenChange={o=>{if(!o&&!reviewMutation.isPending)setReview(null);}}><DialogContent><DialogHeader><DialogTitle>Alert review — reason compulsory</DialogTitle></DialogHeader><div className="space-y-3"><div><Label>Status</Label><Select value={reviewStatus} onValueChange={setReviewStatus}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="reviewed">Reviewed — action chal raha hai</SelectItem><SelectItem value="resolved">Resolved — problem close</SelectItem><SelectItem value="escalated">Escalate to Owner</SelectItem><SelectItem value="open">Keep open</SelectItem></SelectContent></Select></div><div><Label>Kya check/action kiya?</Label><Input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Written reason"/></div><Button className="w-full" disabled={reviewMutation.isPending} onClick={()=>reviewMutation.mutate()}>{reviewMutation.isPending?"Saving…":"Save with audit"}</Button></div></DialogContent></Dialog>
   </div></AppLayout>;
 }

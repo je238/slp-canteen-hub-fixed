@@ -26,9 +26,13 @@ describe("Head Supervisor and Manager access", () => {
       "/reports-center",
       "/meal-profit",
       "/canteens",
+      "/executive-alerts",
     ]);
     expect(canOpen("/menu-scan", "unit_manager")).toBe(true);
     expect(canOpen("/inventory", "unit_manager")).toBe(true);
+    expect(canOpen("/executive-alerts", "unit_manager")).toBe(true);
+    expect(canOpen("/executive-alerts", "manager")).toBe(true);
+    expect(canOpen("/executive-alerts", "head_supervisor")).toBe(false);
     expect(homeFor("unit_manager")).toBe("/requisitions");
   });
 

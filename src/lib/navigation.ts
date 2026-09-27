@@ -99,7 +99,8 @@ export const NAV: NavEntry[] = [
   { path: "/canteens", label: "Sites", icon: Building2,
     roles: [...APPROVAL_MANAGERS, ...ADMIN_UP] },
   { path: "/users", label: "User Management", icon: Shield, roles: ADMIN_UP },
-  { path: "/executive-alerts", label: "Executive Alerts", icon: AlertTriangle, roles: ["ops_manager",...ADMIN_UP] },
+  { path: "/executive-alerts", label: "Executive Alerts", icon: AlertTriangle,
+    roles: [...APPROVAL_MANAGERS, "ops_manager", ...ADMIN_UP] },
   { path: "/audit-log", label: "Audit & Changes", icon: History, roles: ["ops_manager",...ADMIN_UP] },
 ];
 
