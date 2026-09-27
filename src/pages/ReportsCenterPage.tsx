@@ -6,7 +6,7 @@ import {
   usePurchaseReport, useConsumptionReport, useOperationsSummary, useStockAgeing,
   useStockInOutReport, usePeriodSummary,
   useWastageLog, useOwnerMenuProfitBreakdown, useMenuPlans,
-  useDailyItemUsageRateTrend, useItemPurchaseRateHistory, useVegetablePurchaseReport,
+  useDailyItemUsageRateTrend, useItemPurchaseRateHistory, usePeriodPurchaseRateChanges, useVegetablePurchaseReport,
 } from "@/hooks/useSrsData";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -147,6 +147,8 @@ export default function ReportsCenterPage() {
   const { data: itemTrend, isLoading: itemTrendLoading } = useDailyItemUsageRateTrend(
     selectedCanteen, to, 7, canViewProfit,
   );
+  const { data: periodRateChanges = [], isLoading: periodRateChangesLoading, error: periodRateChangesError } =
+    usePeriodPurchaseRateChanges(selectedCanteen, from, to, canViewProfit);
   const { data: purchaseRateHistory = [], isLoading: purchaseRateHistoryLoading } = useItemPurchaseRateHistory(
     selectedCanteen, expandedRateItem, to,
   );
@@ -228,6 +230,12 @@ export default function ReportsCenterPage() {
     return ((itemTrend || []) as any[]).filter((row) => !q ||
       String(row.item_name || "").toLowerCase().includes(q));
   }, [itemTrend, itemTrendSearch]);
+  const periodRateRows = useMemo(() => {
+    const q = itemTrendSearch.trim().toLowerCase();
+    return (periodRateChanges as any[]).filter((row) => !q ||
+      String(row.item_name || "").toLowerCase().includes(q) ||
+      String(row.supplier_name || "").toLowerCase().includes(q));
+  }, [periodRateChanges, itemTrendSearch]);
   const itemTrendSummary = useMemo(() => ({
     purchase: ((itemTrend || []) as any[]).reduce((s, row) => s + Number(row.purchase_value || 0), 0),
     rateUp: ((itemTrend || []) as any[]).filter((row) => Number(row.rate_change || 0) > 0).length,
@@ -1099,6 +1107,69 @@ export default function ReportsCenterPage() {
 
           {/* ---------- Consumption ---------- */}
           <TabsContent value="consumption" className="mt-3 space-y-4">
+            {canViewProfit && (
+              <Card className="border-primary/20 shadow-sm">
+                <CardHeader className="gap-3 pb-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <CardTitle className="text-base">Selected period ke purchase rate changes</CardTitle>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {fmtDayDate(from)} se {fmtDayDate(to)} tak har changed purchase rate, us item ke pichhle valid purchase se comparison.
+                    </p>
+                  </div>
+                  <div className="flex w-full gap-2 md:w-auto">
+                    <Input value={itemTrendSearch} onChange={(e) => setItemTrendSearch(e.target.value)}
+                      placeholder="Item ya vendor search" className="min-w-0 md:w-60" />
+                  <Button variant="outline" size="sm" className="shrink-0" disabled={!periodRateRows.length}
+                    onClick={() => exportCsv(`purchase-rate-changes-${from}-to-${to}.csv`, [
+                      ["Purchase date", "Item", "Vendor", "Quantity", "Unit", "Previous rate", "Purchase rate", "Rate change", "Rate change %", "Line value"],
+                      ...periodRateRows.map((r: any) => [purchaseTime(r.purchase_at), r.item_name, r.supplier_name,
+                        num(r.stock_qty), r.stock_unit, r.previous_rate, r.current_rate, r.rate_change,
+                        r.rate_change_pct, r.line_value]),
+                    ])}>
+                    <Download className="mr-1 h-3.5 w-3.5" /> CSV
+                  </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    {periodRateChangesLoading ? "Rate changes loading…" : `${periodRateRows.length} rate changes`}
+                    {itemTrendSearch && " · item/vendor search applied"}
+                  </p>
+                  {periodRateChangesError ? (
+                    <p className="py-4 text-sm text-destructive">Rate changes load nahi hue. Dobara try karein.</p>
+                  ) : !periodRateChangesLoading && periodRateRows.length === 0 ? (
+                    <p className="py-4 text-sm text-muted-foreground">Is range mein matching confirmed purchase rate change nahi mila.</p>
+                  ) : (
+                    <div className="max-h-[28rem] overflow-auto rounded-lg border">
+                      <Table>
+                        <TableHeader className="sticky top-0 z-10 bg-background"><TableRow>
+                          <TableHead>Date</TableHead><TableHead>Item / vendor</TableHead>
+                          <TableHead className="text-right">Quantity</TableHead>
+                          <TableHead className="text-right">Previous</TableHead>
+                          <TableHead className="text-right">New rate</TableHead>
+                          <TableHead className="text-right">Change</TableHead>
+                        </TableRow></TableHeader>
+                        <TableBody>{periodRateRows.map((row: any, index: number) => {
+                          const difference = Number(row.rate_change || 0);
+                          return <TableRow key={`${row.purchase_id}-${row.ingredient_id}-${index}`}>
+                            <TableCell className="whitespace-nowrap text-xs">{purchaseTime(row.purchase_at)}</TableCell>
+                            <TableCell><b>{row.item_name}</b><span className="block text-xs text-muted-foreground">{row.supplier_name}</span></TableCell>
+                            <TableCell className="text-right whitespace-nowrap">{num(row.stock_qty)} {row.stock_unit}</TableCell>
+                            <TableCell className="text-right whitespace-nowrap">₹{num(row.previous_rate)}/{row.stock_unit}</TableCell>
+                            <TableCell className="text-right whitespace-nowrap">₹{num(row.current_rate)}/{row.stock_unit}</TableCell>
+                            <TableCell className={`text-right font-semibold whitespace-nowrap ${difference > 0 ? "text-destructive" : "text-accent"}`}>
+                              {difference > 0 ? "+" : "−"}₹{num(Math.abs(difference))}/{row.stock_unit}
+                              <span className="block text-xs">{difference > 0 ? "+" : ""}{num(row.rate_change_pct)}%</span>
+                            </TableCell>
+                          </TableRow>;
+                        })}</TableBody>
+                      </Table>
+                    </div>
+                  )}
+                  <p className="mt-3 text-[11px] text-muted-foreground">Stock-unit rate aur confirmed purchases hi compare hote hain. ₹0 rate ko baseline nahi maana gaya.</p>
+                </CardContent>
+              </Card>
+            )}
             {canViewProfit && (
               <Card className="border-primary/20 shadow-sm">
                 <CardHeader className="gap-3 pb-3 md:flex-row md:items-start md:justify-between">

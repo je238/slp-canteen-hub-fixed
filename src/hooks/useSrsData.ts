@@ -869,6 +869,27 @@ export function useDailyItemUsageRateTrend(
   });
 }
 
+export function usePeriodPurchaseRateChanges(
+  canteenId?: string,
+  from?: string,
+  to?: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["periodPurchaseRateChanges", canteenId, from, to],
+    enabled: enabled && !!canteenId && canteenId !== "all" && !!from && !!to,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("period_purchase_rate_changes" as any, {
+        p_canteen_id: canteenId,
+        p_from: from,
+        p_to: to,
+      });
+      if (error) throw error;
+      return (data || []) as any[];
+    },
+  });
+}
+
 export function useItemPurchaseRateHistory(
   canteenId?: string,
   ingredientId?: string | null,
