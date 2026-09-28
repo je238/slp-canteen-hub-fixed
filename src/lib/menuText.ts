@@ -24,7 +24,13 @@ export interface ParsedMeal {
   meal_period: string;
   items: string[];
   date: string | null;   // ISO, when the text carried one
+  day?: string;          // weekday heading on a weekly chart
 }
+
+const weekdayOf = (line: string): string | null => {
+  const match = line.trim().match(/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*[:\-–—]?$/i);
+  return match ? match[1].toLowerCase() : null;
+};
 
 const PERIODS: [RegExp, string][] = [
   [/^(mid\s*-?\s*night|midnight|night\s*snack)/i, "night_snacks"],
@@ -62,6 +68,7 @@ export function parseMenuText(text: string): ParsedMeal[] {
   const lines = String(text || "").split(/\r?\n/);
   const meals: ParsedMeal[] = [];
   let date: string | null = null;
+  let day: string | null = null;
   let current: ParsedMeal | null = null;
 
   for (const raw of lines) {
@@ -70,11 +77,14 @@ export function parseMenuText(text: string): ParsedMeal[] {
     if (!line.trim()) continue;
 
     const asDate = dateOf(line);
-    if (asDate) { date = asDate; continue; }
+    if (asDate) { date = asDate; day = null; current = null; continue; }
+
+    const asDay = weekdayOf(line);
+    if (asDay) { day = asDay; date = null; current = null; continue; }
 
     const period = periodOf(line);
     if (period) {
-      current = { meal_period: period, items: [], date };
+      current = { meal_period: period, items: [], date, ...(day ? { day } : {}) };
       meals.push(current);
       continue;
     }
@@ -89,6 +99,10 @@ export function parseMenuText(text: string): ParsedMeal[] {
   }
 
   // A heading with nothing under it is not a meal.
-  return meals.filter((m) => m.items.length > 0)
-              .map((m) => ({ ...m, date }));   // a date anywhere applies to the day
+  // A single-day message may put its only date at the bottom. Keep that old
+  // behavior, but when there are several dates preserve each meal's own date.
+  const dated = meals.filter((m) => m.items.length > 0);
+  const distinctDates = new Set(dated.map((m) => m.date).filter(Boolean));
+  if (distinctDates.size <= 1 && date) return dated.map((m) => ({ ...m, date: m.date || (m.day ? null : date) }));
+  return dated;
 }

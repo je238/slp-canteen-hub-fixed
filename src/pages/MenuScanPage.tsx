@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useCanteens } from "@/hooks/useSupabaseData";
 import { useSaveMenuPlan, MEAL_PERIODS } from "@/hooks/useSrsData";
 import { supabase } from "@/integrations/supabase/client";
 import { scanFile, scanBase64 } from "@/lib/scan";
 import { parseMenuText } from "@/lib/menuText";
-import { fmtDayDate, todayIst } from "@/lib/date";
+import { fmtDayDate, shiftIst, todayIst, tomorrowIst } from "@/lib/date";
 import ScanProgress from "@/components/ScanProgress";
 import InPageCamera from "@/components/InPageCamera";
 import FilePickButton from "@/components/FilePickButton";
@@ -27,21 +28,14 @@ import { toast } from "sonner";
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
-function isoOf(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-function todayIso() { return isoOf(new Date()); }
-function tomorrowIso() { const d = new Date(); d.setDate(d.getDate() + 1); return isoOf(d); }
-
 // A weekday name from the chart becomes the next date that falls on it, so a
 // Monday row lands on the coming Monday rather than a date in the past.
 function dateForWeekday(day: string, from: string) {
   const target = WEEKDAYS.indexOf(String(day || "").toLowerCase());
   if (target < 0) return null;
-  const d = new Date(`${from}T00:00:00`);
-  const delta = (target - d.getDay() + 7) % 7;
-  d.setDate(d.getDate() + delta);
-  return isoOf(d);
+  const d = new Date(`${from}T00:00:00Z`);
+  const delta = (target - d.getUTCDay() + 7) % 7;
+  return shiftIst(from, delta);
 }
 
 const PERIOD_ALIASES: Record<string, string> = {
@@ -79,9 +73,9 @@ function resolveDate(m: any, startFrom: string): { date: string; mismatch: boole
   const byDay = dateForWeekday(m.day, startFrom);
   if (!m.date) return { date: byDay || startFrom, mismatch: false };
   if (!byDay) return { date: m.date, mismatch: false };
-  const printed = new Date(`${m.date}T00:00:00`);
+  const printed = new Date(`${m.date}T00:00:00Z`);
   const agrees = !isNaN(printed.getTime()) &&
-    WEEKDAYS[printed.getDay()] === String(m.day).toLowerCase();
+    WEEKDAYS[printed.getUTCDay()] === String(m.day).toLowerCase();
   return agrees ? { date: m.date, mismatch: false } : { date: byDay, mismatch: true };
 }
 
@@ -98,11 +92,12 @@ async function fileToBase64(file: File): Promise<string> {
 
 export default function MenuScanPage() {
   const { selectedCanteen } = useAppContext();
+  const { canAccessCanteen } = useAuth();
   const savePlan = useSaveMenuPlan();
 
   const [step, setStep] = useState<"scan" | "review" | "done">("scan");
   const [busy, setBusy] = useState(false);
-  const [startFrom, setStartFrom] = useState(tomorrowIso());
+  const [startFrom, setStartFrom] = useState(tomorrowIst());
   const [rows, setRows] = useState<Row[]>([]);
   const [defaultHeads, setDefaultHeads] = useState("");
   const [savedCount, setSavedCount] = useState(0);
@@ -112,6 +107,7 @@ export default function MenuScanPage() {
   const [dateClash, setDateClash] = useState(false);
   const [toAllUnits, setToAllUnits] = useState(true);
   const { data: canteens } = useCanteens();
+  const accessibleCanteens = (canteens || []).filter((c) => canAccessCanteen(c.id));
 
   // What to do with whatever came back, however the picture was obtained.
   const handleMenu = (menu: any[], what: string) => {
@@ -195,19 +191,26 @@ export default function MenuScanPage() {
       toast.error("No meals found. Each meal needs its name on its own line, dishes underneath.");
       return;
     }
-    const date = meals[0].date || startFrom;
-    setRows(meals.map((m, i) => ({
-      id: `${Date.now()}-${i}`,
-      date,
-      meal_period: m.meal_period,
-      dishes: m.items.map((d) => ({ name: d, qty: "", unit: "kg" })),
-      headcount: "",
-    })));
+    let clash = false;
+    setRows(meals.map((m, i) => {
+      const resolved = resolveDate(m, startFrom);
+      if (resolved.mismatch) clash = true;
+      return {
+        id: `${Date.now()}-${i}`,
+        date: resolved.date,
+        day: m.day,
+        meal_period: m.meal_period,
+        dishes: m.items.map((d) => ({ name: d, qty: "", unit: "kg" })),
+        headcount: "",
+      };
+    }));
+    setDateClash(clash);
     setLastError("");
     setStatus("");
     setStep("review");
     const dishes = meals.reduce((n, m) => n + m.items.length, 0);
-    toast.success(`Read ${meals.length} meals and ${dishes} dishes for ${date}`);
+    const dates = new Set(meals.map((m) => resolveDate(m, startFrom).date));
+    toast.success(`Read ${meals.length} meals and ${dishes} dishes across ${dates.size} date${dates.size > 1 ? "s" : ""}`);
   };
 
   // Straight to the review grid with one row per meal of the day, ready to
@@ -220,6 +223,22 @@ export default function MenuScanPage() {
       dishes: [{ name: "", qty: "", unit: "kg" }],
       headcount: "",
     })));
+    setLastError("");
+    setStatus("");
+    setStep("review");
+  };
+
+  const startBlankWeek = () => {
+    // The five regular meals for each of seven dates. Tea/extra meals can be
+    // added or unused rows removed during review before anything is saved.
+    const regularMeals = MEAL_PERIODS.filter((m) => m.value !== "tea");
+    setRows(Array.from({ length: 7 }, (_, day) => regularMeals.map((meal, mealIndex) => ({
+      id: `${Date.now()}-${day}-${mealIndex}`,
+      date: shiftIst(startFrom, day),
+      meal_period: meal.value,
+      dishes: [{ name: "", qty: "", unit: "kg" }],
+      headcount: "",
+    }))).flat());
     setLastError("");
     setStatus("");
     setStep("review");
@@ -245,16 +264,35 @@ export default function MenuScanPage() {
     return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0]));
   }, [rows]);
 
+  const addMealForDate = (date: string) => {
+    const used = new Set(rows.filter((row) => row.date === date).map((row) => row.meal_period));
+    const next = MEAL_PERIODS.find((meal) => !used.has(meal.value));
+    if (!next) { toast.info("Is date par saare meal periods pehle se hain"); return; }
+    setRows((current) => [...current, {
+      id: `${Date.now()}-${Math.random()}`, date, meal_period: next.value,
+      dishes: [{ name: "", qty: "", unit: "kg" }], headcount: "",
+    }]);
+  };
+
   const publish = async () => {
     if (selectedCanteen === "all") { toast.error("Select a site first"); return; }
     const usable = rows.filter((r) => r.date && r.dishes.some((d) => d.name.trim()));
     if (usable.length === 0) { toast.error("Nothing to publish"); return; }
+    const seen = new Set<string>();
+    for (const row of usable) {
+      const key = `${row.date}|${row.meal_period}`;
+      if (seen.has(key)) {
+        toast.error(`${fmtDayDate(row.date)} ka ${row.meal_period} menu do baar hai. Ek row hataayein.`);
+        return;
+      }
+      seen.add(key);
+    }
 
     // The three Eicher units cook the same menu, so publishing it once and
     // having it land on all of them is the honest amount of work. Only the
     // headcount differs between them, and that is set per unit afterwards.
     const targets = toAllUnits
-      ? (canteens || []).map((c: any) => c.id)
+      ? accessibleCanteens.map((c) => c.id)
       : [selectedCanteen];
     if (targets.length === 0) targets.push(selectedCanteen);
 
@@ -286,10 +324,15 @@ export default function MenuScanPage() {
             });
             n++;
           } catch (e: any) {
-            // A meal already published on that unit and date is not a
-            // failure worth abandoning the rest of the week for.
-            const where = (canteens || []).find((c: any) => c.id === site)?.name || "a unit";
-            clashes.push(`${where} ${r.date} ${r.meal_period}`);
+            // A pre-existing published meal can be skipped. Permission or
+            // network failures must not be mislabeled as duplicates, because
+            // that would make a partly uploaded week look complete.
+            if (e?.code === "MENU_ALREADY_EXISTS" || e?.code === "23505") {
+              const where = (canteens || []).find((c: any) => c.id === site)?.name || "a unit";
+              clashes.push(`${where} ${r.date} ${r.meal_period}`);
+            } else {
+              throw new Error(`${n} meals saved before upload stopped at ${r.date} ${r.meal_period}: ${e?.message || e}`);
+            }
           }
         }
       }
@@ -312,7 +355,7 @@ export default function MenuScanPage() {
   const reset = () => { setStep("scan"); setRows([]); setSavedCount(0); };
 
   return (
-    <AppLayout title="Daily Menu">
+    <AppLayout title="Menu Upload">
       <ScanProgress busy={busy} status={status} />
       <div className="max-w-4xl mx-auto space-y-4 animate-fade-in">
         <div className="flex items-center gap-4">
@@ -335,12 +378,13 @@ export default function MenuScanPage() {
           <Card className="border-none shadow-sm">
             <CardContent className="p-6 space-y-4">
               <p className="text-sm text-muted-foreground">
-                Photograph the menu the company sent — one day or a whole week. Rows written as
-                weekdays are placed on the next matching date, starting from the date below.
+                Company ka ek din ya poore 7 din ka menu upload karein. Photo/file scan karein,
+                WhatsApp text paste karein, ya 7-day template mein khud likhein. Publish se pehle
+                har date aur meal review karna zaroori hai.
               </p>
               <div className="space-y-1.5 max-w-xs">
                 <Label className="text-xs">Menu starts from</Label>
-                <Input type="date" value={startFrom} min={todayIso()} onChange={(e) => setStartFrom(e.target.value)} />
+                <Input type="date" value={startFrom} min={todayIst()} onChange={(e) => setStartFrom(e.target.value)} />
               </div>
 
               {/* The camera stays on this page. Handing off to the phone's
@@ -386,7 +430,10 @@ export default function MenuScanPage() {
                     <ClipboardPaste className="w-4 h-4 mr-1.5" /> Read this menu
                   </Button>
                   <Button variant="outline" size="sm" onClick={startBlank}>
-                    <Plus className="w-4 h-4 mr-1.5" /> Write the menu myself
+                    <Plus className="w-4 h-4 mr-1.5" /> Write 1 day
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={startBlankWeek}>
+                    <CalendarDays className="w-4 h-4 mr-1.5" /> Write 7 days
                   </Button>
                 </div>
               </div>
@@ -432,7 +479,7 @@ export default function MenuScanPage() {
                 {/* The units cook the same menu, so it is published to all of
                     them at once. Only the headcount differs, and that is set
                     per unit on Menu & Production afterwards. */}
-                {(canteens?.length ?? 0) > 1 && (
+                {accessibleCanteens.length > 1 && (
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox" className="w-4 h-4 accent-current"
@@ -440,7 +487,7 @@ export default function MenuScanPage() {
                       onChange={(e) => setToAllUnits(e.target.checked)}
                     />
                     <span className="text-xs">
-                      Publish to all {canteens!.length} units
+                      Publish to all {accessibleCanteens.length} units
                       <span className="block text-[10px] text-muted-foreground">
                         same dishes on every unit · the count is recorded once, here
                       </span>
@@ -451,7 +498,7 @@ export default function MenuScanPage() {
                   <div className="space-y-1.5">
                     <Label className="text-xs">Week starts on</Label>
                     <Input
-                      type="date" className="w-44" min={todayIso()} value={startFrom}
+                      type="date" className="w-44" min={todayIst()} value={startFrom}
                       onChange={(e) => e.target.value && respread(e.target.value)}
                     />
                   </div>
@@ -465,11 +512,13 @@ export default function MenuScanPage() {
 
             {grouped.map(([date, dayRows]) => (
               <Card key={date} className="border-none shadow-sm">
-                <CardHeader className="pb-2">
+                <CardHeader className="pb-2 flex-row items-center justify-between gap-2">
                   <CardTitle className="text-sm flex items-center gap-2">
-                    <CalendarDays className="w-4 h-4" />
-                    {fmtDayDate(date)}
+                    <CalendarDays className="w-4 h-4" /> {fmtDayDate(date)}
                   </CardTitle>
+                  <Button variant="outline" size="sm" className="text-xs" onClick={() => addMealForDate(date)}>
+                    <Plus className="w-3 h-3 mr-1" /> Add meal
+                  </Button>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {dayRows.map((r) => (
@@ -487,7 +536,7 @@ export default function MenuScanPage() {
                             value={r.headcount} onChange={(e) => update(r.id, { headcount: e.target.value })} />
                           <span className="text-xs text-muted-foreground">expected</span>
                         </div>
-                        <Input type="date" className="w-36 h-8 text-xs" min={todayIso()}
+                        <Input type="date" className="w-36 h-8 text-xs" min={todayIst()}
                           value={r.date} onChange={(e) => update(r.id, { date: e.target.value })} />
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive ml-auto"
                           onClick={() => setRows((p) => p.filter((x) => x.id !== r.id))}
@@ -546,7 +595,7 @@ export default function MenuScanPage() {
                 </Button>
               </div>
               <div className="flex items-center gap-3">
-                <Badge variant="outline" className="text-xs">{rows.length} meals</Badge>
+                <Badge variant="outline" className="text-xs">{grouped.length} dates · {rows.length} meal rows</Badge>
                 <Button onClick={publish} disabled={busy || savePlan.isPending}>
                   <Send className="w-4 h-4 mr-1.5" /> {busy ? "Publishing…" : "Publish to chef"}
                 </Button>
