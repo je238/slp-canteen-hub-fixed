@@ -26,6 +26,7 @@ import { AlertTriangle, CalendarDays, Camera, CheckCircle2, ChevronDown, Clipboa
 import { toast } from "sonner";
 import { fmtDate, fmtDateTime, fmtDayDate, shiftIst, todayIst, tomorrowIst, yesterdayIst } from "@/lib/date";
 import { requisitionMenuDishes } from "@/lib/requisitionMenu";
+import { parseReviewQty } from "@/lib/requisitionReviewQty";
 import KitchenPlan from "@/components/KitchenPlan";
 import { ReturnButton, PendingReturns } from "@/components/KitchenReturns";
 import VoiceReasonInput from "@/components/VoiceReasonInput";
@@ -394,12 +395,12 @@ export default function RequisitionsPage() {
     const lines = (review.requisition_items || []).map((l: any) => ({
       id: l.id,
       ingredient_id: reviewIngredient[l.id] || l.ingredient_id,
-      approved_qty: Number(approved[l.id]),
+      approved_qty: parseReviewQty(approved[l.id]),
     }));
     const headChefLines = (review.requisition_items || []).map((l: any) => ({
       id: l.id,
       ingredient_id: reviewIngredient[l.id] || l.ingredient_id,
-      head_chef_qty: Number(approved[l.id]),
+      head_chef_qty: parseReviewQty(approved[l.id]),
     }));
     if (approve && lines.some((line: any) => !Number.isFinite(line.approved_qty) || line.approved_qty < 0)) {
       toast.error("Har quantity 0 ya usse zyada honi chahiye");
@@ -1885,6 +1886,58 @@ export default function RequisitionsPage() {
               ? "Har item aur quantity poori tarah edit kar sakte hain. Quantity 0 karne par woh line cancel maani jayegi. Chef ka original order audit me safe rahega."
               : "Head Chef reviewed order ke baad Manager final item aur quantity decide karega. Quantity 0 karne par woh line cancel hogi. Chef aur Head Chef dono ki history safe rahegi."}
           </p>
+          <div className="space-y-3 sm:hidden">
+            {(review?.requisition_items || []).map((l: any) => {
+              const selectedIngredientId = reviewIngredient[l.id] || l.ingredient_id;
+              const selectedIngredient = (ingredients || []).find((x: any) => x.id === selectedIngredientId);
+              const finalUnit = selectedIngredient?.unit || l.unit;
+              const qty = approved[l.id] ?? "";
+              const have = Number(selectedIngredient?.current_stock ?? 0);
+              const take = qty.trim() === "" ? 0 : Number(qty);
+              return <div key={l.id} className="space-y-3 rounded-lg border p-3">
+                <div className="text-sm">
+                  <p className="font-semibold">Chef: {l.ingredients?.name}</p>
+                  <p className="text-xs text-muted-foreground">Requested: {Number(l.requested_qty)} {l.unit}</p>
+                  {!isHeadChef && review?.head_chef_required && <p className="text-xs text-muted-foreground">
+                    Head Chef: {l.head_chef_ingredient?.name || l.ingredients?.name} · {Number(l.head_chef_qty ?? l.requested_qty)} {l.head_chef_ingredient?.unit || l.unit}
+                  </p>}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{isHeadChef ? "Head Chef item" : "Manager final item"}</Label>
+                  <Select value={selectedIngredientId}
+                    onValueChange={(value) => setReviewIngredient((prev) => ({ ...prev, [l.id]: value }))}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Item chuno" /></SelectTrigger>
+                    <SelectContent>
+                      {(ingredients || []).map((item: any) => (
+                        <SelectItem key={item.id} value={item.id}>{item.name} · {item.unit}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`review-qty-${l.id}`} className="text-xs">
+                      {isHeadChef ? "Head Chef quantity" : "Final quantity"} ({finalUnit})
+                    </Label>
+                    <Input id={`review-qty-${l.id}`} type="number" inputMode="decimal"
+                      min={0} step="0.001" className="h-11 text-base"
+                      value={qty}
+                      onChange={(e) => setApproved((prev) => ({ ...prev, [l.id]: e.target.value }))} />
+                  </div>
+                  <Button type="button" variant="outline" className="h-11 text-destructive"
+                    onClick={() => setApproved((prev) => ({ ...prev, [l.id]: "0" }))}>
+                    <Trash2 className="mr-1 h-4 w-4" /> 0 karo
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Stock: {have} {finalUnit}
+                  {take > have && <span className="font-semibold text-destructive"> · {Math.round((take - have) * 1000) / 1000} short</span>}
+                  {take === 0 && qty !== "" && " · Line cancel hogi"}
+                </p>
+              </div>;
+            })}
+          </div>
+          <div className="hidden sm:block">
           <Table>
             <TableHeader>
               <TableRow>
@@ -1961,6 +2014,7 @@ export default function RequisitionsPage() {
               })}
             </TableBody>
           </Table>
+          </div>
 
           {/* Said once, at the bottom, where the approve button is. */}
           {shortInReview.length > 0 && (
@@ -1996,12 +2050,15 @@ export default function RequisitionsPage() {
           <VoiceReasonInput value={reviewNotes} onChange={setReviewNotes}
             label={isHeadChef ? "Verification note" : "Review note"}
             placeholder="Quantity change ki ho to reason zaroor likhein" />
+          <p className="text-xs text-muted-foreground">
+            Item ya quantity badli hai to upar reason likhein; bina reason ke changed order save nahi hoga.
+          </p>
           <DialogFooter className="items-center sm:justify-between gap-3">
             {!isHeadChef ? (
               <Button variant="destructive" onClick={() => review && cancelWholeOrder(review)} disabled={cancelReq.isPending}>
                 <Trash2 className="mr-1.5 h-4 w-4" /> Pura order cancel
               </Button>
-            ) : <span className="text-xs text-muted-foreground">Item badalna ya order cancel karna Manager ka control hai.</span>}
+            ) : <span className="text-xs text-muted-foreground">Har line ki quantity 0 kar sakte hain; poora order cancel Manager karega.</span>}
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => submitReview(false)} disabled={reviewReq.isPending || headChefReviewReq.isPending || assignLeavePickup.isPending}>Reject</Button>
               <Button onClick={() => submitReview(true)} disabled={reviewReq.isPending || headChefReviewReq.isPending || assignLeavePickup.isPending || (!isHeadChef && storeLeaveMode && pickupName.trim().length < 2)}>
