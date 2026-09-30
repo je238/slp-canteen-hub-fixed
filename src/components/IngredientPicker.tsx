@@ -65,7 +65,7 @@ export default function IngredientPicker({
     if (!q) return ingredients.slice(0, 8);
     return ingredients
       .map((i) => ({ i, score: nameLikeness(q, i.name) + (norm(i.name).startsWith(norm(q)) ? 0.3 : 0) }))
-      .filter((m) => m.score >= 0.45 || norm(m.i.name).includes(norm(q)))
+      .filter((m) => m.score >= 0.6 || norm(m.i.name).includes(norm(q)))
       .sort((a, b) => b.score - a.score)
       .slice(0, 8)
       .map((m) => m.i);
