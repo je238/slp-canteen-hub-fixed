@@ -17,6 +17,7 @@ import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { canOpen } from "@/lib/navigation";
 import { formatAlertRate } from "@/lib/alertRate";
+import { findStockAlertMovement, stockAlertRate, type StockMovement } from "@/lib/stockAlertDetails";
 
 const IMPORTANT_ACTIONS = [
   "stock_adjusted","rate_corrected","ingredient_renamed","ingredient_unit_changed","ingredient_removed","ingredient_merged",
@@ -44,6 +45,7 @@ const actionTitle=(action:string)=>({
 type FeedItem={
   key:string; source:"audit"|"automatic"|"system"; siteId?:string|null; site:string; title:string; description:string;
   severity:"critical"|"warning"|"info"; status:string; at:string; oldValue?:string; newValue?:string;
+  oldLabel?:string; newLabel?:string; impactLabel?:string;
   reason?:string; person?:string; impact?:number; reviewId?:string; to?:string;
   details?:{label:string;value:string}[]; history?:{date:string;meal?:string;req_no?:number;issued_qty:number}[];
   attachments?:{id:string;path:string;label:string;amount?:number|null;billDate?:string|null;uploadedAt:string;uploadedBy:string}[];
@@ -70,16 +72,17 @@ export default function ExecutiveAlertsPage(){
     queryKey:["executiveExceptionSource"], refetchInterval:60_000,
     queryFn:async()=>{
       const from=sinceIso(30);
-      const [fraud,logs,purchases,scans,units,operations]=await Promise.all([
-        supabase.from("fraud_alerts").select("*").in("status",["open","reviewed","escalated"]).order("created_at",{ascending:false}).limit(200),
+      const [fraud,logs,purchases,scans,units,operations,stockMovements]=await Promise.all([
+        supabase.from("fraud_alerts").select("*,ingredients(name,unit)").in("status",["open","reviewed","escalated"]).order("created_at",{ascending:false}).limit(200),
         supabase.from("action_logs").select("id,user_id,action,entity_type,canteen_id,details,created_at").in("action",IMPORTANT_ACTIONS).gte("created_at",from).order("created_at",{ascending:false}).limit(300),
         supabase.from("purchases").select("id,canteen_id,supplier_id,status,total_amount,stated_total,tax_amount,other_charges,bill_status,payment_status,invoice_image_url,bill_received_at,approved_at,created_at,created_by,suppliers(name),purchase_items(id,ingredient_id,item_name,quantity,unit,rate,total,matched),purchase_invoice_files(id,image_path,bill_number,bill_date,amount,uploaded_by,created_at),purchase_line_corrections(id,corrected_by,reason,old_values,new_values,created_at)").eq("status","confirmed").gte("created_at",from).order("created_at",{ascending:true}),
         supabase.from("ocr_scan_events" as any).select("id,canteen_id,status,error_message,duration_ms,created_at,user_id").gte("created_at",sinceIso(7)).order("created_at",{ascending:false}),
         supabase.from("historical_unit_review" as any).select("purchase_item_id,canteen_id,created_at,item_name,bill_unit,master_unit,conversion_confirmed,conversion_note").eq("conversion_confirmed",false),
         supabase.rpc("executive_alert_details" as any,{p_date:todayIso()}),
+        supabase.from("stock_ledger").select("id,canteen_id,ingredient_id,reference_type,change_qty,balance_after,reason,created_at,created_by").in("reference_type",["audit","manual"]).gte("created_at",from).order("created_at",{ascending:false}).limit(1000),
       ]);
       const rows=(r:any)=>r.error?[]:(r.data||[]);
-      return {fraud:rows(fraud),logs:rows(logs),purchases:rows(purchases),scans:rows(scans),units:rows(units),operations:rows(operations)};
+      return {fraud:rows(fraud),logs:rows(logs),purchases:rows(purchases),scans:rows(scans),units:rows(units),operations:rows(operations),stockMovements:rows(stockMovements)};
     }
   });
 
@@ -112,6 +115,40 @@ export default function ExecutiveAlertsPage(){
     };
     for(const row of raw.fraud){
       const isPriceSpike=row.title==="Suspicious Price Spike";
+      const isStockDifference=row.alert_type==="stock_discrepancy"&&row.ingredient_id&&row.expected_value!=null&&row.actual_value!=null;
+      if(isStockDifference){
+        const itemName=row.ingredients?.name||"Item name unavailable";
+        const unit=row.ingredients?.unit||"";
+        const difference=Number(row.actual_value)-Number(row.expected_value);
+        const movement=findStockAlertMovement(row,raw.stockMovements as StockMovement[]);
+        const rate=stockAlertRate(row);
+        const sourceLabel=movement?.reference_type==="audit"?"Physical stock verification":movement?.reference_type==="manual"?"Manual stock correction":"Stock difference alert";
+        const enteredBy=movement?.created_by?users[movement.created_by]||"User record unavailable":"Entry user not linked";
+        out.push({
+          key:`fraud-${row.id}`,source:"system",siteId:row.canteen_id,site:siteNames[row.canteen_id]||"Site",
+          title:`${row.title} — ${itemName}`,
+          description:`${itemName} · ${sourceLabel} · ${dateTime(movement?.created_at||row.created_at)} · ${qty(Math.abs(difference),unit)} kam`,
+          severity:row.severity==="critical"?"critical":"warning",status:row.status,at:row.created_at,
+          oldLabel:"App stock (count se pehle)",oldValue:qty(row.expected_value,unit),
+          newLabel:"Physical count",newValue:qty(row.actual_value,unit),
+          reason:row.review_note||"Physical count aur app stock ka difference. Wajah verify karni baaki hai; ye chori ka proof nahi hai.",
+          impact:Number(row.loss_value||0),impactLabel:"Estimated difference value",
+          reviewId:row.id,to:"/stock-audit",person:movement?enteredBy:undefined,
+          details:[
+            {label:"Item",value:`${itemName}${unit?` · ${unit}`:""}`},
+            {label:"Source",value:sourceLabel},
+            {label:"Count/entry time",value:dateTime(movement?.created_at||row.created_at)},
+            {label:"Recorded by",value:enteredBy},
+            {label:"App stock before count",value:qty(row.expected_value,unit)},
+            {label:"Physical stock counted",value:qty(row.actual_value,unit)},
+            {label:"Physical minus app",value:qty(difference,unit)},
+            {label:"Alert-time estimated rate",value:rate==null?"Rate unavailable":`${money(rate)} / ${unit||"unit"}`},
+            {label:"Estimated difference value",value:money(row.loss_value)},
+            ...(movement?[{label:"Stock ledger reference",value:`#${movement.id.slice(0,8).toUpperCase()}`}]:[]),
+          ],
+        });
+        continue;
+      }
       const purchase:any=row.purchase_id?purchaseById.get(row.purchase_id):null;
       const sameItemLines:any[]=(purchase?.purchase_items||[]).filter((line:any)=>line.ingredient_id===row.ingredient_id);
       const alertRate=Number(row.actual_value||0);
@@ -332,12 +369,12 @@ function AlertCard({item,open,onToggle,onGo,onReview}:{item:FeedItem;open:boolea
           </div>
           <p className="text-sm mt-1">{item.site} · {item.description}</p>
           {item.oldValue||item.newValue?<div className="mt-2 grid grid-cols-[1fr_auto_1fr] items-center gap-2 max-w-2xl">
-            <div className="rounded-lg border bg-background/70 p-2"><p className="text-[9px] uppercase text-muted-foreground">Pehle / normal</p><p className="text-sm font-semibold break-words">{item.oldValue||"—"}</p></div>
+            <div className="rounded-lg border bg-background/70 p-2"><p className="text-[9px] uppercase text-muted-foreground">{item.oldLabel||"Pehle / normal"}</p><p className="text-sm font-semibold break-words">{item.oldValue||"—"}</p></div>
             <ArrowRight className="w-4 h-4 text-muted-foreground"/>
-            <div className="rounded-lg border bg-background/70 p-2"><p className="text-[9px] uppercase text-muted-foreground">Ab / actual</p><p className="text-sm font-semibold break-words">{item.newValue||"—"}</p></div>
+            <div className="rounded-lg border bg-background/70 p-2"><p className="text-[9px] uppercase text-muted-foreground">{item.newLabel||"Ab / actual"}</p><p className="text-sm font-semibold break-words">{item.newValue||"—"}</p></div>
           </div>:null}
           <div className="mt-2 rounded-lg border bg-background/70 px-3 py-2"><p className="text-[10px] uppercase text-muted-foreground">Reason / detection</p><p className="text-sm break-words">{item.reason||"—"}</p></div>
-          {Number(item.impact)>0?<p className="text-xs mt-2 text-destructive font-semibold">Rupee impact: {money(item.impact)}</p>:null}
+          {Number(item.impact)>0?<p className="text-xs mt-2 text-destructive font-semibold">{item.impactLabel||"Rupee impact"}: {money(item.impact)}</p>:null}
         </div>
         <div className="text-xs text-muted-foreground lg:text-right shrink-0 space-y-1">
           <p className="flex lg:justify-end items-center gap-1"><UserRound className="w-3 h-3"/>{item.person||"Automatic check"}</p>
