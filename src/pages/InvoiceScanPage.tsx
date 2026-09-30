@@ -16,6 +16,7 @@ import ScanProgress from "@/components/ScanProgress";
 import { scanBase64 } from "@/lib/scan";
 import FilePickButton from "@/components/FilePickButton";
 import { saveDraft, loadDraft, clearDraft } from "@/lib/draft";
+import { cleanVendorName, isPlausibleVendorName } from "@/lib/vendorName";
 
 // One bill at a time per person, so a draft cannot be mistaken for another.
 const DRAFT_KEY = "invoice-scan";
@@ -285,9 +286,16 @@ export default function InvoiceScanPage() {
   }, []);
 
   const matchOrCreateVendor = async (meta: InvoiceMeta | null): Promise<string> => {
-    const name = meta?.vendor_name?.trim() || "";
+    // The model has written its reasoning, a whole letterhead and a looped
+    // syllable into this field; each became a vendor. Clean it, and if what
+    // is left still does not look like a shop name, let the store keeper pick.
+    const name = cleanVendorName(meta?.vendor_name) || "";
     const key = vendorKey(name);
     if (!name || key.length < 3 || selectedCanteen === "all") return "";
+    if (!isPlausibleVendorName(name)) {
+      toast.warning("Vendor ka naam saaf nahi padha — list se vendor chunein");
+      return "";
+    }
 
     // Refresh once from the database: the supplier query may still be loading
     // when a fast scan completes, or another user may just have added it.
@@ -371,7 +379,9 @@ export default function InvoiceScanPage() {
     setScannedItems(matched);
 
     // Header fields + vendor auto-match (older function deployments return no `invoice`)
-    const meta: InvoiceMeta | null = data?.invoice || null;
+    const meta: InvoiceMeta | null = data?.invoice
+      ? { ...data.invoice, vendor_name: cleanVendorName(data.invoice.vendor_name) }
+      : null;
     setInvoiceMeta(meta);
     setSupplierId(await matchOrCreateVendor(meta));
 

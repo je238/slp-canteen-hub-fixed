@@ -15,7 +15,10 @@ invoice number, typed text or formal item codes. If visible rows contain an
 item description and numbers, return every such row.
 
 Header fields (use null when not present on the invoice):
-- vendor_name: the SELLER / supplier issuing the invoice (letterhead / "for <company>"), NOT the buyer in "Bill to"
+- vendor_name: the SELLER / supplier issuing the invoice (letterhead / "for <company>"), NOT the buyer in "Bill to".
+  ONLY the shop's name, at most 6 words, in English letters (e.g. "Manwani Traders",
+  "New Ganesh Milk Point"). No address, phone, tagline, product list, notes or
+  explanation. Never write your reasoning into any field. If unsure, use null.
 - invoice_number
 - invoice_date: ISO format YYYY-MM-DD
 - gstin: the SELLER's GSTIN
@@ -122,6 +125,43 @@ const MENU_SCHEMA = {
   },
   required: ["menu"],
 };
+
+// The vision model is a reasoning model, and on a hard handwritten bill it has
+// written its own thinking into the vendor_name field ("Let's use Manwani
+// Traders... Wait, the M/s is SLP..."), pasted the whole letterhead, or looped
+// one syllable a thousand times. The app saved each of those as a new vendor.
+// Whatever the model sends, only a short clean name leaves this function.
+const REASONING = /\b(let'?s|wait|vendor[_ ]name|as per|letterhead|context|actually|i think|check)\b/i;
+
+export function cleanVendorName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  let v = raw.replace(/[​-‍﻿]/g, "").trim();
+  if (!v) return null;
+
+  // Reasoning usually ends by stating the answer: take the last stated name.
+  if (REASONING.test(v)) {
+    const said = [...v.matchAll(/(?:vendor name is|let'?s (?:write|use|put)|name is)\s+["“]?([^."”()\n]{2,60})/gi)];
+    if (said.length) v = said[said.length - 1][1];
+  }
+
+  v = v.split(/\r?\n/)[0];                 // a letterhead dump: its first line is the name
+  v = v.replace(/\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]{3}.*$/i, ""); // a GSTIN glued on
+  v = v.replace(/\d{1,4}[-/.]\d{1,2}[-/.]\d{2,4}.*$/, "");     // a date glued on
+  v = v.replace(/\d{5,}.*$/, "");                               // a phone or bill no.
+  v = v.replace(/\(.*$/, "");              // "(from warranty text ..." and anything after
+  v = v.split(/\s+[-–|]\s+/)[0];           // "Shop - Ganga Nagar - Dewas"
+  const parts = v.split(/\s*\/\s*/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length > 1) v = parts.find((p) => /[A-Za-z]{3}/.test(p)) ?? parts[0];
+  v = v.replace(/(.{3,}?)\1{2,}.*/u, "$1"); // a looped syllable
+  v = v.replace(/\s+/g, " ").replace(/[.,;:]+$/, "").trim();
+
+  if (v.length < 2 || REASONING.test(v)) return null;
+  if (v.length > 60) v = v.slice(0, 60).replace(/\s+\S*$/, "");
+  if (/^[A-Z0-9 &.'-]+$/.test(v) && /[A-Z]{3}/.test(v)) {
+    v = v.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  return v || null;
+}
 
 const MODELS = [
   // Full Flash reads dense printed tables and difficult handwriting much more
@@ -335,7 +375,10 @@ serve(async (req) => {
     }
 
     const items = Array.isArray(parsed.items) ? parsed.items : [];
-    const invoice = parsed.invoice ?? null;
+    const invoice = parsed.invoice && typeof parsed.invoice === "object"
+      ? { ...(parsed.invoice as Record<string, unknown>),
+          vendor_name: cleanVendorName((parsed.invoice as Record<string, unknown>).vendor_name) }
+      : null;
     return new Response(JSON.stringify({ items, invoice }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

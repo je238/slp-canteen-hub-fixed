@@ -79,7 +79,7 @@ export const NAV: NavEntry[] = [
   { path: "/invoice-scan", label: "Invoice Scan", icon: ScanLine,
     roles: STORE_AND_ADMIN, hideFrom: OWNER_AND_ADMIN },
   { path: "/inventory", label: "Inventory", icon: Package, roles: ["store_keeper", ...MANAGER_READ] },
-  { path: "/central-kitchen", label: "Central Kitchen", icon: ArrowLeftRight,
+  { path: "/central-kitchen", label: "Sun Pharma Udhaar", icon: ArrowLeftRight,
     roles: ["store_keeper", ...MANAGER_READ] },
   { path: "/purchases", label: "Purchases", icon: Truck, roles: ["store_keeper", ...MANAGER_READ] },
   { path: "/vendor-bills", label: "Vendor Bills", icon: FileUp, roles: STORE_AND_ADMIN },

@@ -104,6 +104,54 @@ export function useReturnCentralKitchenTransfer() {
   });
 }
 
+// Eicher lending to Sun Pharma: stock leaves at what it cost, and Sun Pharma
+// owes it back. Not consumption — reports count only issues.
+export function useLendCentralKitchenTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { canteen_id: string; party: string; transfer_date: string; expected_return_date?: string; notes?: string; items: { ingredient_id: string; qty: number }[] }) => {
+      const { data, error } = await supabase.rpc("lend_central_kitchen_transfer" as any, {
+        p_canteen_id: args.canteen_id,
+        p_party_name: args.party,
+        p_transfer_date: args.transfer_date,
+        p_expected_return_date: args.expected_return_date || null,
+        p_items: args.items,
+        p_notes: args.notes || null,
+      });
+      if (error) throw error;
+      return data as any;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["centralKitchenTransfers"] });
+      qc.invalidateQueries({ queryKey: ["ingredients"] });
+      qc.invalidateQueries({ queryKey: ["inventory"] });
+      qc.invalidateQueries({ queryKey: ["ingredientRates"] });
+      qc.invalidateQueries({ queryKey: ["dailyOperatingSnapshot"] });
+    },
+  });
+}
+
+// What Eicher lent coming back: stock returns at the value it left at.
+export function useReceiveBackCentralKitchenTransfer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { transfer_id: string; items: { item_id: string; qty: number }[]; note?: string }) => {
+      const { data, error } = await supabase.rpc("receive_back_central_kitchen_transfer" as any, {
+        p_transfer_id: args.transfer_id, p_items: args.items, p_note: args.note || null,
+      });
+      if (error) throw error;
+      return data as any;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["centralKitchenTransfers"] });
+      qc.invalidateQueries({ queryKey: ["ingredients"] });
+      qc.invalidateQueries({ queryKey: ["inventory"] });
+      qc.invalidateQueries({ queryKey: ["ingredientRates"] });
+      qc.invalidateQueries({ queryKey: ["dailyOperatingSnapshot"] });
+    },
+  });
+}
+
 // ---------------- Menu planning ----------------
 
 export function useMenuPlans(canteenId?: string, from?: string, to?: string) {
