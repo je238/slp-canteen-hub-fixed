@@ -212,9 +212,15 @@ export default function RequisitionsPage() {
   // A Manager sees an order only after the required Head Chef stage. Head
   // Chef keeps already-forwarded rows visible as read-only proof that the
   // order reached the next person.
-  const pending = allPending.filter((r: any) => !isManagerOrAbove
-    || !r.head_chef_required
-    || r.head_chef_status === "approved");
+  // Two stages, shown the same way to everyone who is not doing the review
+  // themselves. The store keeper used to see every pending order in one list
+  // and the manager only the ones past the head chef, so their counts never
+  // matched — and top-ups the head chef never opened (for 16, 22 and 25
+  // September) sat invisible to the manager for weeks.
+  const waitingOnHeadChef = (r: any) => r.head_chef_required && r.head_chef_status !== "approved";
+  const headChefStage = allPending.filter(waitingOnHeadChef);
+  const pending = (isHeadChef || isChef) ? allPending : allPending.filter((r: any) => !waitingOnHeadChef(r));
+  const mealDayPassed = (r: any) => !!r.menu_plans?.menu_date && r.menu_plans.menu_date < todayIst();
   const approvedRaw = list.filter((r: any) => r.status === "approved");
   const done = list.filter((r: any) => ["issued", "rejected", "cancelled"].includes(r.status));
 
@@ -1163,7 +1169,7 @@ export default function RequisitionsPage() {
         ) : (
           <Tabs defaultValue="pending" className="order-2">
             <TabsList className="w-full sm:w-auto">
-              <TabsTrigger value="pending">{isChef ? "Approval mein" : isHeadChef ? "Verify requisitions" : "Awaiting approval"} ({pending.length})</TabsTrigger>
+              <TabsTrigger value="pending">{isChef ? "Approval mein" : isHeadChef ? "Verify requisitions" : "Awaiting approval"} ({pending.length}{!isHeadChef && !isChef && headChefStage.length ? ` · head chef ${headChefStage.length}` : ""})</TabsTrigger>
               <TabsTrigger value="approved">{isChef ? "Store se lena" : "Ready to issue"} ({approvedList.length})</TabsTrigger>
               <TabsTrigger value="history">{isChef ? "Purane orders" : "History"} ({done.length})</TabsTrigger>
               {SHOW_AUG20_ACTUAL_CHECK && canIssueStock && !isChef && <TabsTrigger value="actual-check">20 Aug actual check</TabsTrigger>}
@@ -1221,6 +1227,30 @@ export default function RequisitionsPage() {
                       <Button size="sm" onClick={() => openReview(r)}>Review &amp; full edit</Button>
                     </div>
                   ) : null)}
+
+              {!requisitionsError && !isLoading && !isHeadChef && !isChef && headChefStage.length > 0 && (
+                <div className="space-y-2 pt-2">
+                  <div className="rounded-md border border-warning/30 bg-warning/5 p-3 text-sm">
+                    <b>Head chef ke review mein · {headChefStage.length}</b>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Ye manager tak tabhi pahunchenge jab head chef inhe dekh le.
+                      {headChefStage.some(mealDayPassed) ? ` ${headChefStage.filter(mealDayPassed).length} order aise din ke hain jo nikal chuka — inhe cancel karna chahiye.` : ""}
+                    </p>
+                  </div>
+                  {renderDateGroupedRequisitions(headChefStage, "headchef", "", (r: any) =>
+                    isManagerOrAbove ? (
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {mealDayPassed(r) && <Badge variant="outline" className="text-destructive border-destructive/40">Din nikal gaya</Badge>}
+                        <Button size="sm" variant="outline" className="text-destructive"
+                                onClick={() => cancelWholeOrder(r)} disabled={cancelReq.isPending}>
+                          <Trash2 className="mr-1.5 h-4 w-4" /> Order cancel
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{mealDayPassed(r) ? "Din nikal gaya · head chef ke paas" : "Head chef ke paas"}</span>
+                    ))}
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="approved" className="mt-3 space-y-3">
