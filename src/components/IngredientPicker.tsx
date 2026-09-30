@@ -42,6 +42,8 @@ export function nameLikeness(a: string, b: string): number {
 
 export interface PickerIngredient { id: string; name: string; unit: string; current_stock?: number | string; }
 
+export const ITEM_GROUPS = ["Vegetables & Fruits", "Dairy", "Grocery", "Masala", "Namkeen & Ready Mix", "Housekeeping"];
+
 const UNITS = ["kg", "litre", "packet", "pcs", "box", "tin", "dozen", "gram", "bag", "crate"];
 
 export default function IngredientPicker({
@@ -51,7 +53,7 @@ export default function IngredientPicker({
   value?: string;
   onPick: (ingredient: PickerIngredient) => void;
   /** Omit to hide "new item". */
-  onCreate?: (name: string, unit: string) => Promise<void> | void;
+  onCreate?: (name: string, unit: string, category: string) => Promise<void> | void;
   creating?: boolean;
 }) {
   const picked = ingredients.find((i) => i.id === value);
@@ -59,6 +61,7 @@ export default function IngredientPicker({
   const [open, setOpen] = useState(false);
   const [newMode, setNewMode] = useState(false);
   const [newUnit, setNewUnit] = useState("kg");
+  const [newGroup, setNewGroup] = useState("");
 
   const q = query.trim();
   const matches = useMemo(() => {
@@ -133,7 +136,7 @@ export default function IngredientPicker({
                   <p className="mt-1 text-muted-foreground">Agar wahi hai to usi ko chuno. Do naam se ek saman ka stock bant jaata hai.</p>
                 </div>
               )}
-              <div className="flex items-end gap-2">
+              <div className="flex flex-wrap items-end gap-2">
                 <div className="w-28">
                   <Label className="text-[10px]">Unit</Label>
                   <Select value={newUnit} onValueChange={setNewUnit}>
@@ -141,8 +144,15 @@ export default function IngredientPicker({
                     <SelectContent>{UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <Button type="button" size="sm" className="h-8" disabled={creating}
-                  onClick={async () => { await onCreate(q, newUnit); setOpen(false); setQuery(""); setNewMode(false); }}>
+                <div className="min-w-0 flex-1">
+                  <Label className="text-[10px]">Category</Label>
+                  <Select value={newGroup} onValueChange={setNewGroup}>
+                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Chuno" /></SelectTrigger>
+                    <SelectContent>{ITEM_GROUPS.map((g) => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <Button type="button" size="sm" className="h-8" disabled={creating || !newGroup}
+                  onClick={async () => { await onCreate(q, newUnit, newGroup); setOpen(false); setQuery(""); setNewMode(false); }}>
                   {creating ? "Ban raha…" : nearNames.length ? `Nahi, "${q}" naya hai` : `"${q}" banao`}
                 </Button>
               </div>

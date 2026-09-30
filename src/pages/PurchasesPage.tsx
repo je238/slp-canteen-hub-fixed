@@ -629,11 +629,11 @@ export default function PurchasesPage() {
                         value={item.ingredient_id}
                         onPick={(ingredient) => chooseIngredient(idx, ingredient.id)}
                         creating={addIngredient.isPending}
-                        onCreate={async (name, unit) => {
+                        onCreate={async (name, unit, category) => {
                           if (selectedCanteen === "all") { toast.error("Pehle site chuno"); return; }
                           try {
                             const created: any = await addIngredient.mutateAsync({
-                              canteen_id: selectedCanteen, name, unit, category: "Uncategorised",
+                              canteen_id: selectedCanteen, name, unit, category,
                               current_stock: 0, minimum_stock: 0, cost_per_unit: 0,
                             });
                             updateItem(idx, { ingredient_id: created.id, item_name: created.name, unit: created.unit, rate: 0 });

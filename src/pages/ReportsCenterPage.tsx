@@ -7,6 +7,7 @@ import {
   useStockInOutReport, usePeriodSummary,
   useWastageLog, useOwnerMenuProfitBreakdown, useMenuPlans,
   useDailyItemUsageRateTrend, useItemPurchaseRateHistory, usePeriodPurchaseRateChanges, useVegetablePurchaseReport,
+  usePurchaseByCategory,
 } from "@/hooks/useSrsData";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -132,6 +133,7 @@ export default function ReportsCenterPage() {
   const { data: purchase } = usePurchaseReport(selectedCanteen, from, to);
   const { data: vegetablePurchases, isLoading: vegetablePurchasesLoading } =
     useVegetablePurchaseReport(selectedCanteen, from, to);
+  const { data: byCategory } = usePurchaseByCategory(selectedCanteen, from, to);
   const { data: consumption } = useConsumptionReport(selectedCanteen, from, to);
   const { data: ops } = useOperationsSummary(selectedCanteen, from, to);
   const { data: ageing } = useStockAgeing(selectedCanteen);
@@ -877,6 +879,74 @@ export default function ReportsCenterPage() {
 
           {/* ---------- Purchase ---------- */}
           <TabsContent value="purchase" className="mt-3 space-y-4">
+            {/* What was bought, by group. Every item carries a group, so the
+                vegetable total no longer drops the onions that had no
+                category; and the bill total is shown against lines + GST +
+                charges, with any gap named instead of hidden. */}
+            <Card className="border-none shadow-sm">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="text-sm">Kya kitna kharida — category wise</CardTitle>
+                  <p className="mt-1 text-xs text-muted-foreground">Grocery, sabzi, dairy, masala sab alag. Amount bill ki line (GST se pehle) hai.</p>
+                </div>
+                <Button variant="outline" size="sm" className="text-xs" disabled={!byCategory?.groups?.length}
+                  onClick={() => exportCsv(`purchase-by-category-${from}_${to}.csv`, [
+                    ["Category", "Amount", "Items", "Bills", "Share %"],
+                    ...(byCategory?.groups || []).map((g) => [g.group, Math.round(g.amount), g.items, g.bills,
+                      byCategory!.lines_total ? Math.round(g.amount / byCategory!.lines_total * 1000) / 10 : 0]),
+                    ["Lines total", Math.round(byCategory?.lines_total || 0)],
+                    ["GST", Math.round(byCategory?.tax_total || 0)],
+                    ["Other charges", Math.round(byCategory?.other_charges || 0)],
+                    ["Bill total", Math.round(byCategory?.bill_total || 0)],
+                  ])}>
+                  <Download className="w-3.5 h-3.5 mr-1" /> CSV
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {!byCategory ? <p className="text-sm text-muted-foreground">Loading…</p> : !byCategory.groups.length ? (
+                  <p className="text-sm text-muted-foreground">In dates mein koi confirmed purchase nahi.</p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                      {[
+                        ["Kul bill", money(byCategory.bill_total)],
+                        ["Saman (lines)", money(byCategory.lines_total)],
+                        ["GST", money(byCategory.tax_total)],
+                        ["Bills", String(byCategory.bills)],
+                      ].map(([k, v]) => (
+                        <div key={k} className="rounded-lg border p-2.5"><p className="text-[10px] text-muted-foreground">{k}</p><p className="text-base font-bold">{v}</p></div>
+                      ))}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader><TableRow>
+                          <TableHead>Category</TableHead><TableHead className="text-right">Amount</TableHead>
+                          <TableHead className="text-right">Hissa</TableHead><TableHead className="text-right">Items</TableHead>
+                          <TableHead>Sabse zyada</TableHead>
+                        </TableRow></TableHeader>
+                        <TableBody>
+                          {byCategory.groups.map((g) => (
+                            <TableRow key={g.group}>
+                              <TableCell className="font-medium whitespace-nowrap">{g.group}</TableCell>
+                              <TableCell className="text-right tabular-nums">{money(g.amount)}</TableCell>
+                              <TableCell className="text-right tabular-nums">{byCategory.lines_total ? (g.amount / byCategory.lines_total * 100).toFixed(1) : "0"}%</TableCell>
+                              <TableCell className="text-right tabular-nums">{g.items}</TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {g.top.slice(0, 4).map((t) => `${t.item} ${num(t.qty)} ${t.unit} (${money(t.amount)}${t.avg_rate ? ` @₹${t.avg_rate}` : ""})`).join(" · ")}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <p className={`text-xs ${Math.abs(byCategory.gap) > 1 ? "text-warning font-medium" : "text-muted-foreground"}`}>
+                      Hisaab: saman {money(byCategory.lines_total)} + GST {money(byCategory.tax_total)} + other {money(byCategory.other_charges)} = {money(byCategory.lines_total + byCategory.tax_total + byCategory.other_charges)} · bill total {money(byCategory.bill_total)}
+                      {Math.abs(byCategory.gap) > 1 ? ` · ${money(byCategory.gap)} ka farak — kuch bill ki lines ka jod bill total se nahi milta` : " · barabar"}
+                    </p>
+                  </>
+                )}
+              </CardContent>
+            </Card>
             <Card className="border-none shadow-sm">
               <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
                 <div>

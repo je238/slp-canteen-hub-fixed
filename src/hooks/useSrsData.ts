@@ -878,6 +878,44 @@ function useReportRpc(name: string, key: string, canteenId?: string, from?: stri
 export const usePurchaseReport = (c?: string, f?: string, t?: string) =>
   useReportRpc("purchase_report", "purchaseReport", c, f, t);
 
+// Grocery, vegetables, dairy, masala… side by side, with the bill total
+// reconciled against line totals + GST + charges.
+export function usePurchaseByCategory(canteenId?: string, from?: string, to?: string) {
+  const reportFrom = clampToCutover(from);
+  return useQuery({
+    queryKey: ["purchaseByCategory", canteenId, reportFrom, to],
+    enabled: !!canteenId && canteenId !== "all" && !!reportFrom && !!to,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("purchase_by_category" as any, {
+        p_canteen_id: canteenId, p_start: reportFrom, p_end: to,
+      });
+      if (error) throw error;
+      return data as {
+        groups: { group: string; amount: number; lines: number; bills: number; items: number;
+          top: { item: string; qty: number; unit: string; amount: number; avg_rate: number | null }[] }[];
+        lines_total: number; tax_total: number; other_charges: number; bill_total: number; bills: number; gap: number;
+      };
+    },
+  });
+}
+
+// Why a stock count came out different: last count, movements since,
+// expected vs counted, look-alike items, and the likely cause.
+export function useStockAlertTrail(ingredientId?: string | null, at?: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["stockAlertTrail", ingredientId, at],
+    enabled: enabled && !!ingredientId && !!at,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("stock_alert_trail" as any, {
+        p_ingredient_id: ingredientId, p_at: at,
+      });
+      if (error) throw error;
+      return data as any;
+    },
+  });
+}
+
 export function useVegetablePurchaseReport(canteenId?: string, from?: string, to?: string) {
   const reportFrom = clampToCutover(from);
   return useQuery({

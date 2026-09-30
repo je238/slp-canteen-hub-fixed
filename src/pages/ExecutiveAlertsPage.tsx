@@ -18,6 +18,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { canOpen } from "@/lib/navigation";
 import { formatAlertRate } from "@/lib/alertRate";
 import { findStockAlertMovement, stockAlertRate, type StockMovement } from "@/lib/stockAlertDetails";
+import StockTrail from "@/components/StockTrail";
 
 const IMPORTANT_ACTIONS = [
   "stock_adjusted","rate_corrected","ingredient_renamed","ingredient_unit_changed","ingredient_removed","ingredient_merged",
@@ -47,7 +48,7 @@ type FeedItem={
   severity:"critical"|"warning"|"info"; status:string; at:string; oldValue?:string; newValue?:string;
   oldLabel?:string; newLabel?:string; impactLabel?:string;
   reason?:string; person?:string; impact?:number; reviewId?:string; to?:string;
-  details?:{label:string;value:string}[]; history?:{date:string;meal?:string;req_no?:number;issued_qty:number}[];
+  details?:{label:string;value:string}[]; trail?:{ingredientId:string;at:string}; history?:{date:string;meal?:string;req_no?:number;issued_qty:number}[];
   attachments?:{id:string;path:string;label:string;amount?:number|null;billDate?:string|null;uploadedAt:string;uploadedBy:string}[];
   invoiceLines?:{id:string;item:string;purchaseAt:string;vendor:string;quantity:number;unit:string;rate:number;total:number}[];
   invoiceCorrections?:{id:string;at:string;by:string;reason:string;oldValues:any;newValues:any}[];
@@ -127,13 +128,14 @@ export default function ExecutiveAlertsPage(){
         out.push({
           key:`fraud-${row.id}`,source:"system",siteId:row.canteen_id,site:siteNames[row.canteen_id]||"Site",
           title:`${row.title} — ${itemName}`,
-          description:`${itemName} · ${sourceLabel} · ${dateTime(movement?.created_at||row.created_at)} · ${qty(Math.abs(difference),unit)} kam`,
+          description:`${itemName} · ${sourceLabel} · ${dateTime(movement?.created_at||row.created_at)} · ${qty(Math.abs(difference),unit)} ${difference<0?"kam":"zyada"}`,
           severity:row.severity==="critical"?"critical":"warning",status:row.status,at:row.created_at,
           oldLabel:"App stock (count se pehle)",oldValue:qty(row.expected_value,unit),
           newLabel:"Physical count",newValue:qty(row.actual_value,unit),
           reason:row.review_note||"Physical count aur app stock ka difference. Wajah verify karni baaki hai; ye chori ka proof nahi hai.",
           impact:Number(row.loss_value||0),impactLabel:"Estimated difference value",
           reviewId:row.id,to:"/stock-audit",person:movement?enteredBy:undefined,
+          trail:{ingredientId:row.ingredient_id,at:movement?.created_at||row.created_at},
           details:[
             {label:"Item",value:`${itemName}${unit?` · ${unit}`:""}`},
             {label:"Source",value:sourceLabel},
@@ -356,7 +358,7 @@ export default function ExecutiveAlertsPage(){
 function Stat({label,value,bad}:{label:string;value:number;bad?:boolean}){return <Card className="border-none shadow-sm"><CardContent className="p-3"><p className="text-xs text-muted-foreground">{label}</p><p className={`text-xl font-bold ${bad&&value>0?"text-destructive":""}`}>{value}</p></CardContent></Card>}
 
 function AlertCard({item,open,onToggle,onGo,onReview}:{item:FeedItem;open:boolean;onToggle:()=>void;onGo?:()=>void;onReview?:()=>void}){
-  const hasDetail=!!item.details?.length||!!item.history?.length||!!item.attachments?.length||!!item.invoiceLines?.length||item.invoiceCorrections!==undefined;
+  const hasDetail=!!item.trail||!!item.details?.length||!!item.history?.length||!!item.attachments?.length||!!item.invoiceLines?.length||item.invoiceCorrections!==undefined;
   return <Card className={`border-none shadow-sm ${item.severity==="critical"?"bg-destructive/5":item.severity==="warning"?"bg-warning/5":""}`}>
     <CardContent className="p-4">
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
@@ -383,6 +385,7 @@ function AlertCard({item,open,onToggle,onGo,onReview}:{item:FeedItem;open:boolea
       </div>
 
       {hasDetail&&open?<div className="mt-3 border-t pt-3 space-y-3">
+        {item.trail?<StockTrail ingredientId={item.trail.ingredientId} at={item.trail.at}/>:null}
         {!!item.details?.length&&<div className="grid grid-cols-2 md:grid-cols-4 gap-2">{item.details.map((d,index)=><div key={`${d.label}-${index}`} className="rounded-lg bg-background/80 border p-2.5"><p className="text-[10px] text-muted-foreground">{d.label}</p><p className="text-sm font-semibold break-words mt-0.5">{d.value}</p></div>)}</div>}
         {!!item.attachments?.length&&<div><p className="text-xs font-semibold mb-2">Purchase ke saath laga bill</p><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{item.attachments.map(file=><InvoiceEvidence key={file.id} file={file}/>)}</div></div>}
         {!!item.invoiceLines?.length&&<div><p className="text-xs font-semibold mb-2">Har item ka purchase breakup</p><div className="overflow-x-auto rounded-lg border bg-background/80"><table className="w-full text-xs"><thead><tr className="border-b text-muted-foreground"><th className="text-left p-2">Purchase date</th><th className="text-left p-2">Vendor</th><th className="text-left p-2">Item</th><th className="text-right p-2">Kitna purchase</th><th className="text-right p-2">Cost / rate</th><th className="text-right p-2">Total purchase</th></tr></thead><tbody>{item.invoiceLines.map(line=><tr key={line.id} className="border-b last:border-0"><td className="p-2 whitespace-nowrap">{dateTime(line.purchaseAt)}</td><td className="p-2 whitespace-nowrap">{line.vendor}</td><td className="p-2 font-medium">{line.item}</td><td className="p-2 text-right whitespace-nowrap">{qty(line.quantity,line.unit)}</td><td className="p-2 text-right whitespace-nowrap">{money(line.rate)} / {line.unit||"unit"}</td><td className="p-2 text-right font-semibold whitespace-nowrap">{money(line.total)}</td></tr>)}</tbody></table></div></div>}
