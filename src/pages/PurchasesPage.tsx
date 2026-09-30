@@ -4,7 +4,7 @@ import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   usePurchases, useSuppliers, useAddSupplier, useConfirmPurchase, useIngredients,
-  useReceiveStockWithoutBill, useFinalizePurchaseInvoice, useCorrectPurchaseLine,
+  useReceiveStockWithoutBill, useFinalizePurchaseInvoice, useCorrectPurchaseLine, useAddIngredient,
 } from "@/hooks/useSupabaseData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import { DialogFooter } from "@/components/ui/dialog";
 import { fmtDate } from "@/lib/date";
 import FilePickButton from "@/components/FilePickButton";
 import { compressImage } from "@/lib/image";
+import IngredientPicker from "@/components/IngredientPicker";
 
 // The invoice photo is the purchase's evidence trail (private bucket, so a
 // short-lived signed URL is minted on demand).
@@ -478,6 +479,7 @@ export default function PurchasesPage() {
   const { data: ingredients } = useIngredients(selectedCanteen);
   const addSupplier = useAddSupplier();
   const receiveWithoutBill = useReceiveStockWithoutBill();
+  const addIngredient = useAddIngredient();
   const confirmPurchase = useConfirmPurchase();
 
   const [purchaseDialog, setPurchaseDialog] = useState(false);
@@ -622,7 +624,23 @@ export default function PurchasesPage() {
                   </div>
                   {items.map((item, idx) => (
                     <div key={idx} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_90px_80px_42px] gap-2 items-end mb-2 p-2 bg-muted rounded">
-                      <div><Label className="text-[10px]">Inventory ka saman</Label><Select value={item.ingredient_id} onValueChange={(value) => chooseIngredient(idx, value)}><SelectTrigger className="h-9"><SelectValue placeholder="Saman chuno" /></SelectTrigger><SelectContent>{(ingredients || []).map((ingredient: any) => <SelectItem key={ingredient.id} value={ingredient.id}>{ingredient.name} · stock {Number(ingredient.current_stock)} {ingredient.unit}</SelectItem>)}</SelectContent></Select></div>
+                      <IngredientPicker
+                        ingredients={(ingredients || []) as any[]}
+                        value={item.ingredient_id}
+                        onPick={(ingredient) => chooseIngredient(idx, ingredient.id)}
+                        creating={addIngredient.isPending}
+                        onCreate={async (name, unit) => {
+                          if (selectedCanteen === "all") { toast.error("Pehle site chuno"); return; }
+                          try {
+                            const created: any = await addIngredient.mutateAsync({
+                              canteen_id: selectedCanteen, name, unit, category: "Uncategorised",
+                              current_stock: 0, minimum_stock: 0, cost_per_unit: 0,
+                            });
+                            updateItem(idx, { ingredient_id: created.id, item_name: created.name, unit: created.unit, rate: 0 });
+                            toast.success(`"${created.name}" naya item bana — rate bill aane par lagega`);
+                          } catch (err: any) { toast.error(err.message); }
+                        }}
+                      />
                       <div><Label className="text-[10px]">Kitna aaya?</Label><Input inputMode="decimal" type="number" min="0" step="any" className="h-9 text-xs" value={item.quantity || ""} onChange={e => updateItem(idx, { quantity: Number(e.target.value) })} /></div>
                       <div><Label className="text-[10px]">Unit</Label><Input className="h-9 text-xs" value={item.unit} readOnly /></div>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setItems(items.filter((_, i) => i !== idx))}><Trash2 className="w-3 h-3" /></Button>

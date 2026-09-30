@@ -3,7 +3,7 @@ import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  useRequisitions, useCreateRequisition, useReviewRequisition, useHeadChefReviewRequisition, useIssueRequisitionActual,
+  useRequisitions, useCreateRequisition, useReviewRequisition, useHeadChefReviewRequisition, useIssueRequisitionActual, useStoreSavings,
   useSendRequisitionBack, useClosePendingRequisitionItem, useAdminCorrectRequisition, useCancelRequisition,
   useMenuPlans, useIngredientRates, useSuggestedRequisition, useAvailability, useDailyOperatingSnapshot,
   useMenuWastageContext, useHistoricalIssueReconciliation, useSubmitIssueReconciliation,
@@ -53,13 +53,18 @@ const STATUS_STYLE: Record<string, string> = {
   cancelled: "bg-muted text-muted-foreground",
 };
 
+// One-time 20–29 August hand-over repair. Never used; kept switchable.
+const SHOW_AUG20_ACTUAL_CHECK = false;
+
 export default function RequisitionsPage() {
   const { selectedCanteen } = useAppContext();
   const { isManagerOrAbove, isHeadChef, isChef, canIssueStock, roleData, rank } = useAuth();
   const canAdminCorrect = rank >= 60;
   const isStoreKeeper = String(roleData.role).toLowerCase() === "store_keeper";
   const [kitchenDate, setKitchenDate] = useState(todayIst());
-  const { data: reqs, isLoading, isError: requisitionsError, error: requisitionsLoadError, refetch: refetchRequisitions, isFetching: requisitionsFetching } = useRequisitions(selectedCanteen);
+  // Finished orders older than a week come only when History asks for them.
+  const [fullHistory, setFullHistory] = useState(false);
+  const { data: reqs, isLoading, isError: requisitionsError, error: requisitionsLoadError, refetch: refetchRequisitions, isFetching: requisitionsFetching } = useRequisitions(selectedCanteen, undefined, { fullHistory });
   const { data: ingredients } = useIngredients(selectedCanteen);
   // Yesterday, today AND tomorrow. The chef orders in the afternoon for food
   // that will be cooked tomorrow — the store issues that same evening between
@@ -175,10 +180,18 @@ export default function RequisitionsPage() {
   const [actualIssueReq, setActualIssueReq] = useState<any>(null);
   const [actualIssueQty, setActualIssueQty] = useState<Record<string, string>>({});
   const [actualIssueReason, setActualIssueReason] = useState<Record<string, string>>({});
+  // Per line given short: true = the rest is not needed (a saving, closes the
+  // line); false = the rest is still owed and stays pending.
+  const [closeRest, setCloseRest] = useState<Record<string, boolean>>({});
+  const monthStart = todayIst().slice(0, 8) + "01";
+  const { data: monthSavings } = useStoreSavings(canIssueStock ? selectedCanteen : undefined, monthStart, todayIst());
   const [actualIssueProof, setActualIssueProof] = useState<File | null>(null);
   const [reconciliationDate, setReconciliationDate] = useState("2026-08-20");
   const { data: reconciliationLines = [], isLoading: reconciliationLoading } =
-    useHistoricalIssueReconciliation(canIssueStock ? selectedCanteen : undefined, reconciliationDate);
+    // The 20–29 August hand-over check was a one-time repair and was never
+    // used (no rows). It is off: it cost the store keeper a query on every
+    // open of this page. Flip SHOW_AUG20_ACTUAL_CHECK to bring it back.
+    useHistoricalIssueReconciliation(SHOW_AUG20_ACTUAL_CHECK && canIssueStock ? selectedCanteen : undefined, reconciliationDate);
   const submitReconciliation = useSubmitIssueReconciliation();
   const reviewReconciliation = useReviewIssueReconciliation();
   const [reconciledQty, setReconciledQty] = useState<Record<string, string>>({});
@@ -487,6 +500,7 @@ export default function RequisitionsPage() {
     }
     setActualIssueQty(quantities);
     setActualIssueReason(reasons);
+    setCloseRest({});
     setActualIssueProof(null);
     setActualIssueReq({ ...r, focusLineId });
   };
@@ -494,11 +508,16 @@ export default function RequisitionsPage() {
   const submitActualIssue = async () => {
     if (!actualIssueReq) return;
     const lines = (actualIssueReq.requisition_items || []).filter((line: any) => pendingQty(line) > 0);
-    const payload = lines.map((line: any) => ({
-      requisition_item_id: line.id,
-      actual_qty: Number(actualIssueQty[line.id] || 0),
-      reason: actualIssueReason[line.id]?.trim() || undefined,
-    }));
+    const payload = lines.map((line: any) => {
+      const actual = Number(actualIssueQty[line.id] || 0);
+      const short = actual + 0.000000001 < pendingQty(line);
+      return {
+        requisition_item_id: line.id,
+        actual_qty: actual,
+        reason: actualIssueReason[line.id]?.trim() || (short && closeRest[line.id] ? "Kitchen ko itna hi chahiye tha" : undefined),
+        close_rest: short && !!closeRest[line.id],
+      };
+    });
     if (!payload.some((line: any) => line.actual_qty > 0)) {
       toast.error("Kam se kam ek item ki actual di hui quantity bharein");
       return;
@@ -524,7 +543,7 @@ export default function RequisitionsPage() {
       }
       toast.success(storeLeaveMode
         ? `${res.pickup_person} ka self-pickup photo ke saath save hua · ${res.pending_lines} pending`
-        : `${res.issued_lines} items actual quantity ke hisaab se issue hue · ${res.pending_lines} pending`);
+        : `${res.issued_lines} items issue hue${Number(res.saved_value) > 0 ? ` · ₹${Math.round(Number(res.saved_value)).toLocaleString("en-IN")} ki bachat darj` : ""} · ${res.pending_lines} pending`);
       setActualIssueReq(null);
     } catch (e: any) { toast.error(e.message); }
   };
@@ -1130,6 +1149,15 @@ export default function RequisitionsPage() {
           </div>
         )}
 
+        {selectedCanteen !== "all" && canIssueStock && !isChef && Number(monthSavings?.value) > 0 && (
+          <Card className="order-2 border-success/30 bg-success/5">
+            <CardContent className="p-3 text-sm">
+              <b className="text-success">Is mahine store ne ₹{Math.round(Number(monthSavings!.value)).toLocaleString("en-IN")} ka saman bachaya</b>
+              <span className="text-muted-foreground"> · {monthSavings!.lines} lines{(monthSavings!.items || []).length ? ` · sabse zyada: ${(monthSavings!.items || []).slice(0, 3).map((i: any) => `${i.item} ${Number(i.qty)} ${i.unit}`).join(", ")}` : ""}</span>
+            </CardContent>
+          </Card>
+        )}
+
         {selectedCanteen === "all" ? (
           <Card className="order-2"><CardContent className="p-8 text-center text-sm text-muted-foreground">Select a site to see its requisitions.</CardContent></Card>
         ) : (
@@ -1138,7 +1166,7 @@ export default function RequisitionsPage() {
               <TabsTrigger value="pending">{isChef ? "Approval mein" : isHeadChef ? "Verify requisitions" : "Awaiting approval"} ({pending.length})</TabsTrigger>
               <TabsTrigger value="approved">{isChef ? "Store se lena" : "Ready to issue"} ({approvedList.length})</TabsTrigger>
               <TabsTrigger value="history">{isChef ? "Purane orders" : "History"} ({done.length})</TabsTrigger>
-              {canIssueStock && !isChef && <TabsTrigger value="actual-check">20 Aug actual check</TabsTrigger>}
+              {SHOW_AUG20_ACTUAL_CHECK && canIssueStock && !isChef && <TabsTrigger value="actual-check">20 Aug actual check</TabsTrigger>}
             </TabsList>
 
             <Card className="mt-3 border-none shadow-sm">
@@ -1263,9 +1291,16 @@ export default function RequisitionsPage() {
 
             <TabsContent value="history" className="mt-3 space-y-3">
               {requisitionsError ? null : isLoading ? <p className="text-sm text-muted-foreground">Loading…</p> : renderDateGroupedRequisitions(done, "history", "No history yet.")}
+              {!requisitionsError && !isLoading && (
+                <Button variant="outline" className="w-full" disabled={requisitionsFetching}
+                  onClick={() => setFullHistory((v) => !v)}>
+                  {requisitionsFetching && fullHistory ? "Purane orders aa rahe hain…"
+                    : fullHistory ? "Sirf pichhle 7 din dikhao" : "Pichhle 7 din se purane orders bhi dikhao"}
+                </Button>
+              )}
             </TabsContent>
 
-            {canIssueStock && !isChef && (
+            {SHOW_AUG20_ACTUAL_CHECK && canIssueStock && !isChef && (
               <TabsContent value="actual-check" className="mt-3 space-y-3">
                 <Card className="border-warning/30 bg-warning/5">
                   <CardContent className="p-4 space-y-3">
@@ -1402,16 +1437,54 @@ export default function RequisitionsPage() {
                         onChange={(e) => setActualIssueQty((p) => ({ ...p,[line.id]:e.target.value }))} />
                     </div>
                     <div>
-                      <Label className="text-xs">Internal reason {needsReason ? "*" : ""}</Label>
+                      <Label className="text-xs">Internal reason {needsReason && !closeRest[line.id] ? "*" : ""}</Label>
                       <Input placeholder={needsReason ? `Available ${ready} ${unit} mein se kam kyun diya?` : "Optional"}
                         value={actualIssueReason[line.id] ?? ""}
                         onChange={(e) => setActualIssueReason((p) => ({ ...p,[line.id]:e.target.value }))} />
                     </div>
                   </div>
+                  {/* Given less than ordered: is the rest still owed, or was
+                      it never needed? The second is a saving — it closes the
+                      line and is recorded with its rupee value. */}
+                  {!storeLeaveMode && actual + 0.000000001 < left && (() => {
+                    const rest = Math.round((left - actual) * 1000) / 1000;
+                    const restValue = rest * (rateOf(line.ingredient_id).rate || 0);
+                    const saving = !!closeRest[line.id];
+                    return (
+                      <div className="mt-2 space-y-2 rounded-md bg-muted/40 p-2">
+                        <p className="text-xs">Manga {left} {unit} · diya {actual} {unit} · <b>{rest} {unit} baaki</b></p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button type="button" size="sm" variant={!saving ? "default" : "outline"}
+                            onClick={() => setCloseRest((p) => ({ ...p, [line.id]: false }))}>
+                            Baaki baad mein denge
+                          </Button>
+                          <Button type="button" size="sm" variant={saving ? "default" : "outline"}
+                            onClick={() => setCloseRest((p) => ({ ...p, [line.id]: true }))}>
+                            Baaki nahi chahiye — bachat
+                          </Button>
+                        </div>
+                        {saving && (
+                          <p className="text-xs font-medium text-success">
+                            Bachat: {rest} {unit} · lagbhag ₹{Math.round(restValue).toLocaleString("en-IN")} — order ki ye line band ho jayegi
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
           </div>
+          {(() => {
+            const total = (actualIssueReq?.requisition_items || []).reduce((s: number, line: any) => {
+              if (!closeRest[line.id]) return s;
+              const rest = pendingQty(line) - Number(actualIssueQty[line.id] || 0);
+              return rest > 0 ? s + rest * (rateOf(line.ingredient_id).rate || 0) : s;
+            }, 0);
+            return total > 0 ? (
+              <p className="text-sm font-semibold text-success">Is order par kul bachat: lagbhag ₹{Math.round(total).toLocaleString("en-IN")}</p>
+            ) : null;
+          })()}
           <DialogFooter>
             <Button variant="outline" onClick={() => setActualIssueReq(null)}>Cancel</Button>
             <Button onClick={submitActualIssue}

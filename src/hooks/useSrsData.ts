@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clampToCutover, REPORTING_CUTOVER_DATE } from "@/lib/cutover";
+import { shiftIst, todayIst } from "@/lib/date";
 
 // Data layer for the SRS modules: menu planning, requisition approval,
 // budgets, the vendor portal and inventory ageing. New tables are reached
@@ -319,17 +320,25 @@ export function useUncountedMeals(canteenId?: string, days = 7) {
 
 // ---------------- Requisitions ----------------
 
-export function useRequisitions(canteenId?: string, status?: string) {
+// Finished orders older than this are fetched only when History asks for them.
+export const RECENT_CLOSED_ORDER_DAYS = 7;
+
+export function useRequisitions(canteenId?: string, status?: string, opts?: { fullHistory?: boolean }) {
+  const fullHistory = !!opts?.fullHistory;
   return useQuery({
-    queryKey: ["requisitions", canteenId, status, REPORTING_CUTOVER_DATE],
+    queryKey: ["requisitions", canteenId, status, REPORTING_CUTOVER_DATE, fullHistory],
     enabled: !!canteenId && canteenId !== "all",
     retry: 1,
+    // Keep showing the last list while a refetch runs, so switching the
+    // history toggle or returning to the tab never blanks the screen.
+    placeholderData: (prev) => prev,
     queryFn: async () => {
-      // The old nested PostgREST read hit a statement timeout with 200
-      // orders / 4,409 lines. The RPC checks site access once and returns
-      // the same nested shape, including the entire history since cutover.
+      // Every open order, and finished ones from the last week. Sending all
+      // history since cutover on every open was 4.5 MB and ~2 s — on a phone
+      // the store keeper saw nothing but "loading".
       const { data, error } = await supabase.rpc("requisition_list_for_site" as any, {
         p_canteen_id: canteenId!, p_since: REPORTING_CUTOVER_DATE,
+        p_closed_since: fullHistory ? null : shiftIst(todayIst(), -RECENT_CLOSED_ORDER_DAYS),
       });
       if (error) throw error;
       const rows = (data || []) as any[];
@@ -458,14 +467,31 @@ export function useIssueRequisitionItem() {
 // The quantity which physically leaves the counter is typed explicitly.
 // The old one-click RPC is disabled in the database so a full approved amount
 // can never be recorded merely because it happens to be on the shelf.
+// What the store deliberately held back over a period, with its rupee value.
+export function useStoreSavings(canteenId?: string, from?: string, to?: string) {
+  return useQuery({
+    queryKey: ["storeSavings", canteenId, from, to],
+    enabled: !!canteenId && canteenId !== "all" && !!from && !!to,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("store_savings" as any, {
+        p_canteen_id: canteenId, p_from: from, p_to: to,
+      });
+      if (error) throw error;
+      return (data || { value: 0, lines: 0, items: [] }) as { value: number; lines: number; items: any[] };
+    },
+  });
+}
+
 export function useIssueRequisitionActual() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ requisitionId, items }: {
       requisitionId: string;
-      items: { requisition_item_id: string; actual_qty: number; reason?: string }[];
+      // close_rest: the store gave less on purpose and the remainder is not
+      // owed — it closes as a saving instead of staying pending.
+      items: { requisition_item_id: string; actual_qty: number; reason?: string; close_rest?: boolean }[];
     }) => {
-      const { data, error } = await supabase.rpc("issue_requisition_actual" as any, {
+      const { data, error } = await supabase.rpc("issue_requisition_actual_with_savings" as any, {
         p_req_id: requisitionId,
         p_items: items,
       });
@@ -474,7 +500,8 @@ export function useIssueRequisitionActual() {
     },
     onSuccess: () => {
       for (const key of ["requisitions", "availability", "ingredients", "stockLedger", "ledgerSince",
-        "consumptionReport", "operationsSummary", "periodSummary", "managerDashboard", "storeDashboard"]) {
+        "consumptionReport", "operationsSummary", "periodSummary", "managerDashboard", "storeDashboard",
+        "storeSavings"]) {
         qc.invalidateQueries({ queryKey: [key] });
       }
     },
