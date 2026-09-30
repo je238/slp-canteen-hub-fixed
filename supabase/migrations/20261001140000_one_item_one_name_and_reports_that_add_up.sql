@@ -59,7 +59,7 @@ END $$;
 
 -- ---------- 2. Merge the half-typed duplicates into the real items ----------
 DO $$
-DECLARE m record; v_from uuid; v_into uuid; r jsonb;
+DECLARE m record; fk record; v_from uuid; v_into uuid; r jsonb;
 BEGIN
   FOR m IN SELECT * FROM (VALUES
     ('onio', 'Onion'), ('garli', 'Garlic'), ('maid', 'Maida'), ('rosted papad', 'Roasted papad'),
@@ -72,6 +72,26 @@ BEGIN
     SELECT id INTO v_into FROM public.ingredients
      WHERE canteen_id = 'd4402630-dec6-44fa-b14c-405b45258f99' AND name = m.into_name AND archived_at IS NULL;
     CONTINUE WHEN v_from IS NULL OR v_into IS NULL;
+
+    -- merge_ingredients() moves bills, lots, orders, recipes and the ledger,
+    -- but not the columns added after it was written. Three of those block
+    -- the delete (head chef's substitute, the original ordered item, Sun
+    -- Pharma transfer lines) and two would be silently cascaded away (the
+    -- item's alerts and usage log). Move every one of them first.
+    FOR fk IN
+      SELECT c.conrelid::regclass::text AS tbl, a.attname::text AS col
+        FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+       WHERE c.contype = 'f' AND c.confrelid = 'public.ingredients'::regclass
+         AND (c.conrelid::regclass::text || '.' || a.attname::text) NOT IN (
+           'purchase_items.ingredient_id', 'stock_ledger.ingredient_id', 'recipe_ingredients.ingredient_id',
+           'requisition_items.ingredient_id', 'ingredient_batches.ingredient_id', 'kitchen_returns.ingredient_id')
+    LOOP
+      SET CONSTRAINTS ALL IMMEDIATE;  -- flush the previous merge's pending checks
+      EXECUTE format('ALTER TABLE %s DISABLE TRIGGER USER', fk.tbl);
+      EXECUTE format('UPDATE %s SET %I = $1 WHERE %I = $2', fk.tbl, fk.col, fk.col) USING v_into, v_from;
+      EXECUTE format('ALTER TABLE %s ENABLE TRIGGER USER', fk.tbl);
+    END LOOP;
+
     r := public.merge_ingredients(v_from, v_into);
     RAISE NOTICE 'merged % into %: %', m.from_name, m.into_name, r;
   END LOOP;
@@ -201,6 +221,7 @@ BEGIN
     FROM public.ingredients o
    WHERE o.canteen_id = v_ing.canteen_id AND o.id <> v_ing.id AND o.archived_at IS NULL
      AND coalesce(o.current_stock, 0) > 0
+     AND o.category IS NOT DISTINCT FROM v_ing.category   -- 'Ginger' is not 'Vinger'
      AND (levenshtein(lower(o.name), lower(v_ing.name)) <= 2
           OR (length(o.name) >= 4 AND lower(v_ing.name) LIKE '%' || lower(o.name) || '%')
           OR (length(v_ing.name) >= 4 AND lower(o.name) LIKE '%' || lower(v_ing.name) || '%'));
