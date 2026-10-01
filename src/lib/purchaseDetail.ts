@@ -76,6 +76,8 @@ export function summariseByItem(lines: PurchaseLine[]): ItemSummary[] {
       qty: round(s.qty, 3),
       amount: round(s.amount),
       avgRate: s.qty > 0 ? round(s.amount / s.qty) : null,
+      minRate: s.minRate == null ? null : round(s.minRate),
+      maxRate: s.maxRate == null ? null : round(s.maxRate),
       bills: _bills.size,
       vendors: [..._vendors.values()]
         .map(({ _bills: vb, ...v }) => ({
