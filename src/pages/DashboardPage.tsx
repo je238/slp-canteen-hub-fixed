@@ -15,6 +15,7 @@ import {
   ChevronDown, PackageMinus, RotateCcw, ShoppingCart, Target, Users,
 } from "lucide-react";
 import SeniorRoleDashboard from "@/components/SeniorRoleDashboard";
+import StoreBillDesk from "@/components/StoreBillDesk";
 
 // The home screen each role actually needs first thing in the morning.
 // Manager and store keeper see different things, so the same page renders
@@ -152,6 +153,8 @@ export default function DashboardPage() {
                 sub="consumption ÷ revenue" icon={Target}
                 tone={Number(moneySnapshot?.food_cost_pct || 0) > 50 ? "bad" : "good"} />
             </div>
+
+            {selectedCanteen && selectedCanteen !== "all" && <StoreBillDesk canteenId={selectedCanteen} />}
 
             {Number(sk.unpaid_purchases) > 0 && (
               <Card className="border-none shadow-sm bg-warning/5">

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   usePurchases, useSuppliers, useAddSupplier, useConfirmPurchase, useIngredients,
-  useReceiveStockWithoutBill, useFinalizePurchaseInvoice, useCorrectPurchaseLine, useAddIngredient,
+  useReceiveStockWithoutBill, useNoBillRatePreview, useFinalizePurchaseInvoice, useCorrectPurchaseLine, useAddIngredient,
 } from "@/hooks/useSupabaseData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -488,10 +489,25 @@ export default function PurchasesPage() {
   const [notes, setNotes] = useState("");
   const blankItem = (): PurchaseItemForm => ({ ingredient_id: "", item_name: "", quantity: 0, unit: "kg", rate: 0, total: 0 });
   const [items, setItems] = useState<PurchaseItemForm[]>([blankItem()]);
+  // Until the bill comes, each item takes its last rate on a real bill;
+  // only an item never priced needs a rate typed.
+  const { data: noBillRates } = useNoBillRatePreview(selectedCanteen, items.map((i) => i.ingredient_id));
+  const lastRate = (id: string) => Number(noBillRates?.[id]?.rate || 0);
   const [expandedPurchase, setExpandedPurchase] = useState<string | null>(null);
   const [confirmedView, setConfirmedView] = useState<"date" | "vendor">("date");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [billPurchase, setBillPurchase] = useState<any | null>(null);
+  // The store keeper's bill desk links here with ?bill=<purchase id>: open
+  // that purchase's bill screen straight away.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedBill = searchParams.get("bill");
+  useEffect(() => {
+    if (!linkedBill || !purchases) return;
+    const found = purchases.find((row: any) => row.id === linkedBill);
+    if (found) setBillPurchase(found);
+    searchParams.delete("bill");
+    setSearchParams(searchParams, { replace: true });
+  }, [linkedBill, purchases]); // eslint-disable-line react-hooks/exhaustive-deps
   const [correctionTarget, setCorrectionTarget] = useState<{ purchase: any; line: any } | null>(null);
 
   // Supplier form
@@ -528,10 +544,11 @@ export default function PurchasesPage() {
       await receiveWithoutBill.mutateAsync({
         canteen_id: selectedCanteen,
         supplier_id: supplierId || undefined,
-        items: validItems.map((item) => ({ ingredient_id: item.ingredient_id, quantity: item.quantity })),
+        items: validItems.map((item) => ({ ingredient_id: item.ingredient_id, quantity: item.quantity,
+          ...(lastRate(item.ingredient_id) === 0 && item.rate > 0 ? { rate: item.rate } : {}) })),
         notes: notes || undefined,
       });
-      toast.success("Saman stock mein aa gaya — bill pending list mein rakha hai");
+      toast.success("Saman stock mein aa gaya — pichhle bill ke rate par. Bill aane par asli rate daalna.");
       setPurchaseDialog(false);
       setItems([blankItem()]);
       setNotes("");
@@ -623,7 +640,7 @@ export default function PurchasesPage() {
                     </Button>
                   </div>
                   {items.map((item, idx) => (
-                    <div key={idx} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_90px_80px_42px] gap-2 items-end mb-2 p-2 bg-muted rounded">
+                    <div key={idx} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_90px_70px_110px_42px] gap-2 items-end mb-2 p-2 bg-muted rounded">
                       <IngredientPicker
                         ingredients={(ingredients || []) as any[]}
                         value={item.ingredient_id}
@@ -643,13 +660,29 @@ export default function PurchasesPage() {
                       />
                       <div><Label className="text-[10px]">Kitna aaya?</Label><Input inputMode="decimal" type="number" min="0" step="any" className="h-9 text-xs" value={item.quantity || ""} onChange={e => updateItem(idx, { quantity: Number(e.target.value) })} /></div>
                       <div><Label className="text-[10px]">Unit</Label><Input className="h-9 text-xs" value={item.unit} readOnly /></div>
+                      {(() => {
+                        const known = item.ingredient_id ? noBillRates?.[item.ingredient_id] : undefined;
+                        if (!item.ingredient_id) return <div />;
+                        if (known && Number(known.rate) > 0) return (
+                          <div><Label className="text-[10px]">Rate (pichhla bill)</Label>
+                            <Input className="h-9 text-xs" value={`₹${Number(known.rate)}/${item.unit}`} readOnly />
+                            <p className="mt-0.5 text-[9px] text-muted-foreground">{known.from ? fmtDate(known.from) : "purana rate"}</p></div>);
+                        return (
+                          <div><Label className="text-[10px]">Rate (naya item)</Label>
+                            <Input inputMode="decimal" type="number" min="0" step="any" className="h-9 text-xs border-warning" placeholder="₹ andaza"
+                              value={item.rate || ""} onChange={(e) => updateItem(idx, { rate: Number(e.target.value) })} />
+                            <p className="mt-0.5 text-[9px] text-warning">pehle kabhi nahi khareeda</p></div>);
+                      })()}
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setItems(items.filter((_, i) => i !== idx))}><Trash2 className="w-3 h-3" /></Button>
                     </div>
                   ))}
                 </div>
                 <div><Label className="text-xs">Notes</Label><Input value={notes} onChange={e => setNotes(e.target.value)} /></div>
                 <div className="flex justify-between items-center border-t pt-3">
-                  <span className="text-xs text-muted-foreground">Value last known rate se provisional rahegi, bill baad mein attach hoga.</span>
+                  <span className="text-xs text-muted-foreground">
+                    Abhi ki value ≈ ₹{Math.round(items.reduce((sum, item) => sum + item.quantity * (lastRate(item.ingredient_id) || item.rate || 0), 0)).toLocaleString("en-IN")} (pichhle bill ke rate).
+                    Bill aane par Purchases → "Bill aaya" mein asli rate daalna.
+                  </span>
                   <Button onClick={handleReceiveWithoutBill} disabled={receiveWithoutBill.isPending} className="bg-accent text-accent-foreground hover:bg-accent/90">
                     {receiveWithoutBill.isPending ? "Stock add ho raha hai…" : "Receive karke stock mein jodo"}
                   </Button>

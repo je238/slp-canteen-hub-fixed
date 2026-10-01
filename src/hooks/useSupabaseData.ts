@@ -196,7 +196,8 @@ export function useReceiveStockWithoutBill() {
     mutationFn: async ({ canteen_id, supplier_id, items, notes }: {
       canteen_id: string;
       supplier_id?: string;
-      items: { ingredient_id: string; quantity: number }[];
+      // rate is used by the database only for an item never priced on a bill
+      items: { ingredient_id: string; quantity: number; rate?: number }[];
       notes?: string;
     }) => {
       const { data, error } = await supabase.rpc("receive_stock_without_bill" as any, {
@@ -213,6 +214,50 @@ export function useReceiveStockWithoutBill() {
       qc.invalidateQueries({ queryKey: ["ingredients"] });
       qc.invalidateQueries({ queryKey: ["ingredientRates"] });
       qc.invalidateQueries({ queryKey: ["storeKeeperDashboard"] });
+      qc.invalidateQueries({ queryKey: ["storeBillDesk"] });
+    },
+  });
+}
+
+// The rate each item will take if received without a bill: its last rate on
+// a real bill, and that bill's date. 0 means the item has never been priced.
+export function useNoBillRatePreview(canteenId: string | undefined, ingredientIds: string[]) {
+  const ids = [...new Set(ingredientIds.filter(Boolean))].sort();
+  return useQuery({
+    queryKey: ["noBillRatePreview", canteenId, ids.join(",")],
+    enabled: !!canteenId && canteenId !== "all" && ids.length > 0,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("no_bill_rate_preview" as any, {
+        p_canteen_id: canteenId, p_ingredient_ids: ids,
+      });
+      if (error) throw error;
+      return (data || {}) as Record<string, { rate: number; from: string | null }>;
+    },
+  });
+}
+
+export interface StoreBillDesk {
+  pending: { purchase_id: string; date: string; days: number; vendor: string; value: number; items: string | null; unpriced: number }[];
+  pending_count: number;
+  pending_value: number;
+  pending_oldest_days: number | null;
+  pending_over_3_days: number;
+  unfinal: { purchase_id: string; date: string; days: number; vendor: string; value: number }[];
+  mistakes: { at: string; date: string; kind: "total_mismatch" | "corrected" | "rate_jump" | "unmatched" | "no_vendor";
+              purchase_id: string; vendor: string; item: string | null; detail: string; impact: number }[];
+}
+
+// Bills the store still owes paper for, and the last 30 days' mistakes on
+// bills — what the store keeper has to chase or fix.
+export function useStoreBillDesk(canteenId?: string) {
+  return useQuery({
+    queryKey: ["storeBillDesk", canteenId],
+    enabled: !!canteenId && canteenId !== "all",
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("store_bill_desk" as any, { p_canteen_id: canteenId });
+      if (error) throw error;
+      return data as StoreBillDesk;
     },
   });
 }
@@ -244,6 +289,7 @@ export function useFinalizePurchaseInvoice() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["storeBillDesk"] });
       qc.invalidateQueries({ queryKey: ["ingredients"] });
       qc.invalidateQueries({ queryKey: ["ingredientRates"] });
       qc.invalidateQueries({ queryKey: ["storeKeeperDashboard"] });
