@@ -7,7 +7,7 @@ import {
   useStockInOutReport, usePeriodSummary,
   useWastageLog, useOwnerMenuProfitBreakdown, useMenuPlans,
   useDailyItemUsageRateTrend, useItemPurchaseRateHistory, usePeriodPurchaseRateChanges, usePurchaseLineReport,
-  usePurchaseByCategory,
+  usePurchaseByCategory, useConsumptionByCategory,
 } from "@/hooks/useSrsData";
 import { categoryTotals, summariseByItem } from "@/lib/purchaseDetail";
 import { useAuth } from "@/contexts/AuthContext";
@@ -140,6 +140,9 @@ export default function ReportsCenterPage() {
   const [detailView, setDetailView] = useState<"items" | "lines">("items");
   const [expandedDetailItem, setExpandedDetailItem] = useState<string | null>(null);
   const { data: byCategory } = usePurchaseByCategory(selectedCanteen, from, to);
+  const { data: consByCategory, isLoading: consByCategoryLoading, error: consByCategoryError } =
+    useConsumptionByCategory(selectedCanteen, from, to);
+  const [consCategory, setConsCategory] = useState<string | null>(null);
   const { data: consumption } = useConsumptionReport(selectedCanteen, from, to);
   const { data: ops } = useOperationsSummary(selectedCanteen, from, to);
   const { data: ageing } = useStockAgeing(selectedCanteen);
@@ -1267,6 +1270,113 @@ export default function ReportsCenterPage() {
 
           {/* ---------- Consumption ---------- */}
           <TabsContent value="consumption" className="mt-3 space-y-4">
+            {/* What the kitchen used per category, beside what was bought in
+                the same dates. Bought minus used is roughly what went onto
+                the shelf (or, if negative, came off it). */}
+            <Card className="border-none shadow-sm">
+              <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="text-sm">Category-wise consumption — kitna use hua</CardTitle>
+                  <p className="mt-1 text-xs text-muted-foreground">Grocery, sabzi, dairy sab alag. Kitchen ko jo gaya (issue + recipe − wapas aaya), usi dates ki kharidi ke saath. Category pe click karo to har item dikhega.</p>
+                </div>
+                <Button variant="outline" size="sm" className="text-xs" disabled={!consByCategory?.groups?.length}
+                  onClick={() => exportCsv(`consumption-by-category-${from}_${to}.csv`, [
+                    ["Category", "Item", "Qty", "Unit", "Avg rate", "Value", "Days used"],
+                    ...(consByCategory?.groups || []).flatMap((g) => [
+                      [g.group, "TOTAL", "", "", "", Math.round(g.value), ""],
+                      ...g.list.map((it) => [g.group, it.item, num(it.qty), it.unit, it.avg_rate ?? "", Math.round(it.value), it.days]),
+                    ]),
+                    ["All", "TOTAL", "", "", "", Math.round(consByCategory?.total || 0), ""],
+                  ])}>
+                  <Download className="w-3.5 h-3.5 mr-1" /> CSV
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {consByCategoryError ? <p className="text-sm text-muted-foreground">Category consumption abhi load nahi hua.</p>
+                  : consByCategoryLoading || !consByCategory ? <p className="text-sm text-muted-foreground">Loading…</p>
+                  : !consByCategory.groups.length ? <p className="text-sm text-muted-foreground">In dates mein koi consumption nahi.</p>
+                  : (
+                  <>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader><TableRow>
+                          <TableHead>Category</TableHead>
+                          <TableHead className="text-right">Use hua (consumption)</TableHead>
+                          <TableHead className="text-right">Hissa</TableHead>
+                          <TableHead className="text-right">Kharida</TableHead>
+                          <TableHead className="text-right">Kharida − use</TableHead>
+                          <TableHead className="text-right">Items</TableHead>
+                        </TableRow></TableHeader>
+                        <TableBody>
+                          {consByCategory.groups.map((g) => {
+                            const bought = byCategory?.groups?.find((b) => b.group === g.group)?.amount;
+                            const open = consCategory === g.group;
+                            return (
+                              <TableRow key={g.group} className={`cursor-pointer ${open ? "bg-muted/60" : ""}`}
+                                onClick={() => setConsCategory(open ? null : g.group)}>
+                                <TableCell className="font-medium whitespace-nowrap">
+                                  <ChevronDown className={`inline w-3.5 h-3.5 mr-1 transition-transform ${open ? "" : "-rotate-90"}`} />
+                                  {g.group}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums font-semibold">{money(g.value)}</TableCell>
+                                <TableCell className="text-right tabular-nums">{consByCategory.total ? (g.value / consByCategory.total * 100).toFixed(1) : "0"}%</TableCell>
+                                <TableCell className="text-right tabular-nums">{bought != null ? money(bought) : "—"}</TableCell>
+                                <TableCell className={`text-right tabular-nums ${bought != null && bought - g.value < 0 ? "text-warning" : "text-muted-foreground"}`}>
+                                  {bought != null ? `${bought - g.value < 0 ? "−" : ""}${money(Math.abs(bought - g.value))}` : "—"}
+                                </TableCell>
+                                <TableCell className="text-right tabular-nums">{g.items}</TableCell>
+                              </TableRow>
+                            );
+                          })}
+                          <TableRow>
+                            <TableCell className="font-semibold">Total</TableCell>
+                            <TableCell className="text-right tabular-nums font-bold">{money(consByCategory.total)}</TableCell>
+                            <TableCell className="text-right">100%</TableCell>
+                            <TableCell className="text-right tabular-nums">{byCategory ? money(byCategory.lines_total) : "—"}</TableCell>
+                            <TableCell className="text-right tabular-nums text-muted-foreground">
+                              {byCategory ? `${byCategory.lines_total - consByCategory.total < 0 ? "−" : ""}${money(Math.abs(byCategory.lines_total - consByCategory.total))}` : "—"}
+                            </TableCell>
+                            <TableCell />
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+                    {consCategory && (() => {
+                      const g = consByCategory.groups.find((x) => x.group === consCategory);
+                      if (!g) return null;
+                      const list = g.list.filter((it) => matchesSearch(it.item, it.unit));
+                      return (
+                        <div className="rounded-lg border">
+                          <p className="px-3 py-2 text-xs font-semibold">{g.group} — {g.items} items · {money(g.value)}</p>
+                          <div className="max-h-[28rem] overflow-auto">
+                            <Table>
+                              <TableHeader><TableRow>
+                                <TableHead className="text-xs">Item</TableHead>
+                                <TableHead className="text-xs text-right">Kitna use hua</TableHead>
+                                <TableHead className="text-xs text-right">Avg rate</TableHead>
+                                <TableHead className="text-xs text-right">Value</TableHead>
+                                <TableHead className="text-xs text-right">Din</TableHead>
+                              </TableRow></TableHeader>
+                              <TableBody>
+                                {list.map((it) => (
+                                  <TableRow key={it.item + it.unit}>
+                                    <TableCell className="text-sm font-medium">{it.item}</TableCell>
+                                    <TableCell className="text-sm text-right whitespace-nowrap">{num(it.qty)} {it.unit}</TableCell>
+                                    <TableCell className="text-sm text-right whitespace-nowrap">{it.avg_rate != null ? `₹${it.avg_rate}/${it.unit}` : "—"}</TableCell>
+                                    <TableCell className="text-sm text-right font-semibold whitespace-nowrap">{money(it.value)}</TableCell>
+                                    <TableCell className="text-xs text-right text-muted-foreground">{it.days}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
+              </CardContent>
+            </Card>
             {canViewProfit && (
               <Card className="border-primary/20 shadow-sm">
                 <CardHeader className="gap-3 pb-3 md:flex-row md:items-start md:justify-between">

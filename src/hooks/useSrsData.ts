@@ -1021,6 +1021,31 @@ export function usePurchaseLineReport(canteenId?: string, from?: string, to?: st
 export const useConsumptionReport = (c?: string, f?: string, t?: string) =>
   useReportRpc("consumption_report", "consumptionReport", c, f, t);
 
+export interface ConsumptionByCategory {
+  groups: {
+    group: string; value: number; items: number;
+    list: { item: string; unit: string; qty: number; value: number; avg_rate: number | null; days: number }[];
+  }[];
+  total: number;
+}
+
+// What the kitchen used, per category (Grocery, Vegetables & Fruits, Dairy…),
+// on the same net consumption every food-cost figure reads.
+export function useConsumptionByCategory(canteenId?: string, from?: string, to?: string) {
+  return useQuery({
+    queryKey: ["consumptionByCategory", canteenId, from, to],
+    enabled: !!canteenId && canteenId !== "all" && !!from && !!to,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("consumption_by_category" as any, {
+        p_canteen_id: canteenId, p_start: from, p_end: to,
+      });
+      if (error) throw error;
+      return (data || { groups: [], total: 0 }) as ConsumptionByCategory;
+    },
+  });
+}
+
 export function useDailyItemUsageRateTrend(
   canteenId?: string,
   date?: string,
