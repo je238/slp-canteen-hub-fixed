@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { History, Search, UserRound, CalendarClock, Building2 } from "lucide-react";
+import { AlertTriangle, History, Search, UserRound, CalendarClock, Building2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { auditSummary as summarise, bigJumps } from "@/lib/auditText";
 import AppLayout from "@/components/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,40 +38,18 @@ const LABELS: Record<string, string> = {
   menu_dish_corrected: "Manager ne menu dish correct ki",
   menu_dish_removed: "Manager ne menu dish remove ki",
   kitchen_return_accepted: "Kitchen return accept hua",
+  manager_reviewed_requisition: "Manager ne order review kiya",
+  head_chef_approved_requisition: "Head Chef ne order approve kiya",
+  plates_corrected: "Plates count correct hua",
+  company_punch_recorded: "Eicher punch record hua",
+  company_punch_corrected: "Eicher punch correct hua",
+  unit_count_recorded: "Unit ka plate count record hua",
+  unit_count_corrected: "Unit ka plate count correct hua",
 };
 
 const human = (value: string) => LABELS[value] || value.replace(/_/g, " ");
 
-function valueText(value: any): string {
-  if (value == null || value === "") return "—";
-  if (Array.isArray(value)) {
-    return value.map((row) => {
-      if (typeof row !== "object" || row == null) return String(row);
-      const item = row.item || row.item_name || row.name || "line";
-      const was = row.was ?? row.old_qty ?? row.old;
-      const now = row.now ?? row.new_qty ?? row.new;
-      return was != null || now != null ? `${item}: ${valueText(was)} → ${valueText(now)}` : `${item}: ${JSON.stringify(row)}`;
-    }).join(" · ");
-  }
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
-
-function auditSummary(details: any) {
-  const d = details && typeof details === "object" ? details : {};
-  const parts: string[] = [];
-  if (d.req_no != null) parts.push(`REQ-${d.req_no}`);
-  if (d.item) parts.push(String(d.item));
-  else if (d.dish) parts.push(String(d.dish));
-  if (d.meal_period) parts.push(human(String(d.meal_period)));
-  if (d.was != null || d.now != null) parts.push(`${valueText(d.was)} → ${valueText(d.now)}`);
-  if (d.old_values || d.new_values) parts.push(`${valueText(d.old_values)} → ${valueText(d.new_values)}`);
-  if (d.changes) parts.push(valueText(d.changes));
-  if (d.cancelled_pending_qty != null) parts.push(`${valueText(d.cancelled_pending_qty)} pending band`);
-  if (d.quantity_kg != null) parts.push(`${valueText(d.quantity_kg)} kg · Unit ${valueText(d.unit_no)}`);
-  if (d.expected != null && d.now != null) parts.push(`expected ${valueText(d.expected)}`);
-  return parts.join(" · ") || "Record update hua";
-}
+const auditSummary = (details: any) => summarise(details, human);
 
 function reasonOf(details: any) {
   if (!details || typeof details !== "object") return "—";
@@ -80,13 +60,15 @@ export default function AuditLogPage() {
   const { selectedCanteen } = useAppContext();
   const [from, setFrom] = useState(clampToCutover(isoDaysAgo(30)));
   const [search, setSearch] = useState("");
+  const PAGE = 500;
+  const [limit, setLimit] = useState(PAGE);
   const { data: users = {} } = useUserDirectory();
   const { data: canteens = [] } = useCanteens();
   const { data: logs = [], isLoading, error } = useQuery({
-    queryKey: ["fullAuditLog", selectedCanteen, from],
+    queryKey: ["fullAuditLog", selectedCanteen, from, limit],
     queryFn: async () => {
       let query = supabase.from("action_logs").select("id,user_id,action,entity_type,entity_id,canteen_id,created_at,details")
-        .gte("created_at", `${from}T00:00:00+05:30`).order("created_at", { ascending: false }).limit(500);
+        .gte("created_at", `${from}T00:00:00+05:30`).order("created_at", { ascending: false }).limit(limit);
       // RLS accessible units ko secure rakhta hai; global selector un rows
       // me se ek chosen unit ya saari assigned units dikhata hai.
       if (selectedCanteen !== "all") query = query.eq("canteen_id", selectedCanteen);
@@ -120,7 +102,7 @@ export default function AuditLogPage() {
       </Card>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <Card className="border-none shadow-sm"><CardContent className="p-4"><p className="text-xs text-muted-foreground">Changes shown</p><p className="text-xl font-bold">{filtered.length}</p></CardContent></Card>
+        <Card className="border-none shadow-sm"><CardContent className="p-4"><p className="text-xs text-muted-foreground">Changes shown</p><p className="text-xl font-bold">{filtered.length}</p>{logs.length >= limit && <p className="text-[10px] text-muted-foreground">Sirf latest {limit} — neeche se aur load karein</p>}</CardContent></Card>
         <Card className="border-none shadow-sm"><CardContent className="p-4"><p className="text-xs text-muted-foreground">From</p><p className="text-base font-bold">{new Date(`${from}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p></CardContent></Card>
         <Card className="border-none shadow-sm col-span-2 sm:col-span-1"><CardContent className="p-4"><p className="text-xs text-muted-foreground">Unit</p><p className="text-base font-bold truncate">{selectedCanteen === "all" ? "All accessible units" : siteNames[selectedCanteen] || "Selected unit"}</p></CardContent></Card>
       </div>
@@ -134,6 +116,7 @@ export default function AuditLogPage() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap"><History className="w-4 h-4 text-accent" /><p className="font-semibold text-sm">{human(log.action)}</p><Badge variant="outline" className="text-[10px]">{human(log.entity_type || "system")}</Badge></div>
                 <p className="mt-2 text-sm break-words">{auditSummary(log.details)}</p>
+                {bigJumps(log.details).map((j) => <p key={j} className="mt-1 flex items-center gap-1 text-xs font-medium text-destructive"><AlertTriangle className="w-3.5 h-3.5 shrink-0" />Check karo — {j}</p>)}
                 <div className="mt-2 rounded-lg bg-warning/5 border border-warning/20 px-3 py-2"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Reason</p><p className="text-sm font-medium break-words">{reasonOf(log.details)}</p></div>
               </div>
               <div className="sm:text-right text-xs text-muted-foreground shrink-0 space-y-1">
@@ -143,6 +126,7 @@ export default function AuditLogPage() {
               </div>
             </div>
           </CardContent></Card>)}
+          {logs.length >= limit && <div className="text-center pt-1"><Button variant="outline" size="sm" onClick={() => setLimit((n) => n + PAGE)}>Aur purane {PAGE} dikhao</Button></div>}
         </div>}
     </div>
   </AppLayout>;
