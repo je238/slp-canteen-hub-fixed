@@ -44,4 +44,12 @@ describe("cleanVendorName", () => {
     expect(cleanVendorName(null)).toBeNull();
     expect(cleanVendorName("   ")).toBeNull();
   });
+
+  it("never takes the buyer for the vendor", () => {
+    for (const b of ["Aishar", "EICHER", "M/s SLP Hospitality", "Sun Pharma Central Kitchen", "S.L.P."]) {
+      expect(cleanVendorName(b)).toBeNull();
+    }
+    expect(cleanVendorName("Maa Annapurna Vegetable")).toBe("Maa Annapurna Vegetable");
+    expect(cleanVendorName("Sunrise Traders")).toBe("Sunrise Traders");
+  });
 });

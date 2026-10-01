@@ -12,6 +12,11 @@
 
 const REASONING = /\b(let'?s|wait|vendor[_ ]name|as per|letterhead|context|actually|i think|check)\b/i;
 
+// The buyer's own name is printed on many bills ("Eicher", "M/s SLP",
+// "Sun Pharma") and the reader has taken it for the seller — Maa Annapurna's
+// 1 Oct bill came back as vendor "Aishar". The buyer is never the vendor.
+const BUYER = /^(m\/?s\.?\s*)?(eicher|aishar|aicher|ayshar|eichar|slp|s\.?\s?l\.?\s?p\.?|sun\s*pharma|sunpharma)\b/i;
+
 export function cleanVendorName(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   let v = raw.replace(/[​-‍﻿]/g, "").trim();
@@ -23,6 +28,7 @@ export function cleanVendorName(raw: unknown): string | null {
   }
 
   v = v.split(/\r?\n/)[0];
+  v = v.replace(/^m\s*\/\s*s\.?\s+/i, "");   // "M/s Manwani Traders" -> the name
   // A GSTIN, a date or a bill number glued onto the name: cut at the first.
   v = v.replace(/\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]{3}.*$/i, "");
   v = v.replace(/\d{1,4}[-/.]\d{1,2}[-/.]\d{2,4}.*$/, "");
@@ -34,7 +40,7 @@ export function cleanVendorName(raw: unknown): string | null {
   v = v.replace(/(.{3,}?)\1{2,}.*/u, "$1");
   v = v.replace(/\s+/g, " ").replace(/[.,;:]+$/, "").trim();
 
-  if (v.length < 2 || REASONING.test(v)) return null;
+  if (v.length < 2 || REASONING.test(v) || BUYER.test(v)) return null;
   if (v.length > 60) v = v.slice(0, 60).replace(/\s+\S*$/, "");
   if (/^[A-Z0-9 &.'-]+$/.test(v) && /[A-Z]{3}/.test(v)) {
     v = v.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -45,6 +51,6 @@ export function cleanVendorName(raw: unknown): string | null {
 /** True when a name is fit to become a vendor without a person looking at it. */
 export function isPlausibleVendorName(name: string | null | undefined): name is string {
   if (!name) return false;
-  return name.length >= 2 && name.length <= 60 && !/\n/.test(name) && !REASONING.test(name)
+  return name.length >= 2 && name.length <= 60 && !/\n/.test(name) && !REASONING.test(name) && !BUYER.test(name)
     && !/(.{3,})\1\1/u.test(name);
 }

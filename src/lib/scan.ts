@@ -98,7 +98,9 @@ export async function scanBase64(
   let res: Response | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 75_000);
+    // A handwritten bill takes ~45 s and the server allows up to ~105 s.
+    // Waiting 75 s and then starting over made a slow scan a 150 s failure.
+    const timeout = setTimeout(() => controller.abort(), 115_000);
     try {
       res = await fetch(url, {
         method: "POST",
@@ -112,8 +114,7 @@ export async function scanBase64(
       });
     } catch (error: any) {
       if (error?.name === "AbortError") {
-        if (attempt === 0) { onStage?.("Scanner slow hai — ek baar phir try kar rahe hain…"); continue; }
-        throw new Error("Scanner ne 75 second mein jawab nahi diya. Photo save hai — ek minute baad Scan dabayein.");
+        throw new Error("Scanner ne 2 minute mein jawab nahi diya. Photo save hai — ek minute baad Scan dabayein, ya items haath se type karein.");
       }
       if (attempt === 0) { onStage?.("Connection dobara try kar rahe hain…"); continue; }
       throw new Error("Could not reach the scanner. Check the internet connection and try again.");

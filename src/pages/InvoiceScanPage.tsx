@@ -209,12 +209,15 @@ export default function InvoiceScanPage() {
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Full sensor size at 95% quality was several MB of base64 on mobile
+    // data; 1800px still reads handwriting and arrives in seconds.
+    const scale = Math.min(1, 1800 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.drawImage(video, 0, 0);
-    setCapturedImage(canvas.toDataURL("image/jpeg", 0.95));
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    setCapturedImage(canvas.toDataURL("image/jpeg", 0.85));
     if (stream) { stream.getTracks().forEach(t => t.stop()); setStream(null); }
     setCameraOpen(false);
   };
@@ -278,7 +281,7 @@ export default function InvoiceScanPage() {
 
   const handleManualFile = useCallback(async (file: File) => {
     try {
-      const { base64, mimeType } = await toCompressedBase64(file, 2400);
+      const { base64, mimeType } = await toCompressedBase64(file, 1800);
       beginManualInvoice(file.name, base64, mimeType || "image/jpeg");
     } catch (err: any) {
       toast.error(err.message || "Invoice photo attach nahi hui");
@@ -412,7 +415,7 @@ export default function InvoiceScanPage() {
     setProcessing(true);
     setScanStage(`Preparing ${file.name || "the bill"}…`);
     try {
-      const { base64, mimeType } = await toCompressedBase64(file, 2400);
+      const { base64, mimeType } = await toCompressedBase64(file, 1800);
       setScanStage("Sending it to be read");
       // A gallery photo can arrive with no type at all; scan.ts fills it in.
       await processBase64(file.name, base64, mimeType || (/.pdf$/i.test(file.name) ? "application/pdf" : "image/jpeg"));
@@ -428,7 +431,7 @@ export default function InvoiceScanPage() {
     setProcessing(true);
     setScanStage(`Preparing ${file.name || "the bill"}…`);
     try {
-      const { base64, mimeType } = await toCompressedBase64(file, 2400);
+      const { base64, mimeType } = await toCompressedBase64(file, 1800);
       setScanStage("Sending it to be read");
       await processBase64(file.name, base64, mimeType);
     } catch (err: any) {

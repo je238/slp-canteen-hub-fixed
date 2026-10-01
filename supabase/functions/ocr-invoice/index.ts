@@ -16,6 +16,7 @@ item description and numbers, return every such row.
 
 Header fields (use null when not present on the invoice):
 - vendor_name: the SELLER / supplier issuing the invoice (letterhead / "for <company>"), NOT the buyer in "Bill to".
+  The BUYER is always Eicher / SLP Hospitality / Sun Pharma — never return those (or "Aishar") as vendor_name.
   ONLY the shop's name, at most 6 words, in English letters (e.g. "Manwani Traders",
   "New Ganesh Milk Point"). No address, phone, tagline, product list, notes or
   explanation. Never write your reasoning into any field. If unsure, use null.
@@ -133,6 +134,11 @@ const MENU_SCHEMA = {
 // Whatever the model sends, only a short clean name leaves this function.
 const REASONING = /\b(let'?s|wait|vendor[_ ]name|as per|letterhead|context|actually|i think|check)\b/i;
 
+// The buyer's own name is printed on many bills ("Eicher", "M/s SLP",
+// "Sun Pharma") and the reader has taken it for the seller — Maa Annapurna's
+// 1 Oct bill came back as vendor "Aishar". The buyer is never the vendor.
+const BUYER = /^(m\/?s\.?\s*)?(eicher|aishar|aicher|ayshar|eichar|slp|s\.?\s?l\.?\s?p\.?|sun\s*pharma|sunpharma)\b/i;
+
 export function cleanVendorName(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   let v = raw.replace(/[​-‍﻿]/g, "").trim();
@@ -145,6 +151,7 @@ export function cleanVendorName(raw: unknown): string | null {
   }
 
   v = v.split(/\r?\n/)[0];                 // a letterhead dump: its first line is the name
+  v = v.replace(/^m\s*\/\s*s\.?\s+/i, ""); // "M/s Manwani Traders" -> the name
   v = v.replace(/\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]{3}.*$/i, ""); // a GSTIN glued on
   v = v.replace(/\d{1,4}[-/.]\d{1,2}[-/.]\d{2,4}.*$/, "");     // a date glued on
   v = v.replace(/\d{5,}.*$/, "");                               // a phone or bill no.
@@ -155,7 +162,7 @@ export function cleanVendorName(raw: unknown): string | null {
   v = v.replace(/(.{3,}?)\1{2,}.*/u, "$1"); // a looped syllable
   v = v.replace(/\s+/g, " ").replace(/[.,;:]+$/, "").trim();
 
-  if (v.length < 2 || REASONING.test(v)) return null;
+  if (v.length < 2 || REASONING.test(v) || BUYER.test(v)) return null;
   if (v.length > 60) v = v.slice(0, 60).replace(/\s+\S*$/, "");
   if (/^[A-Z0-9 &.'-]+$/.test(v) && /[A-Z]{3}/.test(v)) {
     v = v.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -167,8 +174,10 @@ const MODELS = [
   // Full Flash reads dense printed tables and difficult handwriting much more
   // reliably than the Lite-only chain that previously returned empty bills.
   // Lite remains the fast fallback for provider load/rate-limit failures.
-  { name: "gemini-3.5-flash", timeoutMs: 40_000 },
-  { name: "gemini-3.5-flash-lite", timeoutMs: 20_000 },
+  // Handwritten bills take ~45 s on Flash; 40 s used to cut them off. The two
+  // together stay inside the app's 115 s wait.
+  { name: "gemini-3.5-flash", timeoutMs: 75_000 },
+  { name: "gemini-3.5-flash-lite", timeoutMs: 30_000 },
 ];
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
@@ -266,7 +275,11 @@ serve(async (req) => {
     const geminiKey = Deno.env.get("GEMINI_API_KEY");
     if (!geminiKey) throw new Error("GEMINI_API_KEY not configured");
 
-    const requestBody = JSON.stringify({
+    // Reading a bill needs eyes, not deliberation. Left to itself the model
+    // "thinks" before answering and a handwritten bill took ~45 s; a low
+    // thinking level brings it down to seconds. If a model refuses the
+    // setting, the same call is repeated without it.
+    const bodyFor = (lowThinking: boolean) => JSON.stringify({
       systemInstruction: {
         parts: [{ text: (isMenu ? MENU_PROMPT : SYSTEM_PROMPT) + knownBlock }],
       },
@@ -283,8 +296,10 @@ serve(async (req) => {
         responseMimeType: "application/json",
         responseSchema: isMenu ? MENU_SCHEMA : RESPONSE_SCHEMA,
         temperature: 0,
+        ...(lowThinking ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
       },
     });
+    let lowThinking = true;
 
     let parsed: Record<string, unknown> | null = null;
     let sawRateLimit = false;
@@ -304,10 +319,20 @@ serve(async (req) => {
               "x-goog-api-key": geminiKey,
               "Content-Type": "application/json",
             },
-            body: requestBody,
+            body: bodyFor(lowThinking),
           },
           model.timeoutMs,
         );
+
+        if (response.status === 400 && lowThinking) {
+          const detail = (await response.clone().text()).slice(0, 300);
+          if (/thinking/i.test(detail)) {
+            console.warn("thinkingLevel refused, retrying without:", detail);
+            lowThinking = false;
+            attempt -= 1;          // same model again, plain request
+            continue;
+          }
+        }
 
         if (response.ok) {
           const data = await response.json();
