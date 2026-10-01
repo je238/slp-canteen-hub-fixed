@@ -190,6 +190,89 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
+// ---------------------------------------------------------------------------
+// The scanner kept breaking about once a week because the model names were
+// typed into this file and Google retires and renames models: Lovable's
+// gateway went, then gemini-1.5/2.0/2.5, then 3.1, each time leaving the
+// store keeper without a scanner until someone edited the names by hand.
+// Now the newest stable Flash and Flash-Lite are asked of Google itself and
+// remembered for a few hours; the list above is only the fallback. A model
+// that answers 404 drops the memory so the next scan asks again.
+// ---------------------------------------------------------------------------
+type Model = { name: string; timeoutMs: number };
+let modelCache: { at: number; list: Model[] } | null = null;
+const MODEL_CACHE_MS = 6 * 60 * 60 * 1000;
+
+async function pickModels(key: string): Promise<Model[]> {
+  if (modelCache && Date.now() - modelCache.at < MODEL_CACHE_MS) return modelCache.list;
+  try {
+    const res = await fetchWithTimeout(
+      "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+      { headers: { "x-goog-api-key": key } },
+      5_000,
+    );
+    if (res.ok) {
+      const data = await res.json() as { models?: { name: string; supportedGenerationMethods?: string[] }[] };
+      const names = (data.models || [])
+        .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+        .map((m) => m.name.replace(/^models\//, ""))
+        // stable names only: no -preview, -exp, -tts, -image, dated snapshots
+        .filter((n) => /^gemini-\d+(\.\d+)?-flash(-lite)?$/.test(n));
+      const version = (n: string) => parseFloat(n.match(/^gemini-(\d+(?:\.\d+)?)/)![1]);
+      const newest = (lite: boolean) => names.filter((n) => n.endsWith("-lite") === lite)
+        .sort((a, b) => version(b) - version(a))[0];
+      const list: Model[] = [];
+      if (newest(false)) list.push({ name: newest(false)!, timeoutMs: MODELS[0].timeoutMs });
+      if (newest(true)) list.push({ name: newest(true)!, timeoutMs: MODELS[1].timeoutMs });
+      if (list.length) {
+        modelCache = { at: Date.now(), list };
+        return list;
+      }
+    } else {
+      console.warn("Model list unavailable:", res.status);
+    }
+  } catch (error) {
+    console.warn("Model list failed:", error instanceof Error ? error.message : error);
+  }
+  return MODELS;
+}
+
+// Said in words the owner can act on, from what Google answered.
+function plainReason(lastError: string, sawRateLimit: boolean): string {
+  if (sawRateLimit || /429|quota|RESOURCE_EXHAUSTED/i.test(lastError)) return "Gemini ka daily/minute quota khatam ho gaya (429). Billing ya quota badhana padega.";
+  if (/API key|API_KEY|PERMISSION_DENIED|-> 40[13]/i.test(lastError)) return "Gemini API key kaam nahi kar rahi (galat, expire ya billing band). Nayi key daalni padegi.";
+  if (/-> 404|not found|NOT_FOUND/i.test(lastError)) return "Google ne ye model band kar diya. Scanner agle scan par naya model khud dhoondhega.";
+  if (/timed out|-> 50[34]|UNAVAILABLE|overloaded/i.test(lastError)) return "Google ka server dheema/busy tha, time par jawab nahi aaya.";
+  return "Scanner fail hua.";
+}
+
+// One alert to the admin per few hours while the scanner is down, so the
+// owner hears it from the app and not a week later from the store keeper.
+async function alertScannerDown(canteenId: string | null, lastError: string, sawRateLimit: boolean) {
+  const url = Deno.env.get("SUPABASE_URL");
+  const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !service) return;
+  const h = { apikey: service, Authorization: `Bearer ${service}`, "Content-Type": "application/json" };
+  try {
+    const since = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    const recent = await fetchWithTimeout(
+      `${url}/rest/v1/notifications?select=id&ref_type=eq.scanner_down&created_at=gte.${since}&limit=1`,
+      { headers: h }, 3_000);
+    if (recent.ok && ((await recent.json()) as unknown[]).length) return;
+    await fetchWithTimeout(`${url}/rest/v1/notifications`, {
+      method: "POST", headers: { ...h, Prefer: "return=minimal" },
+      body: JSON.stringify({
+        canteen_id: canteenId, target_role: "admin",
+        title: "Invoice scanner kaam nahi kar raha",
+        body: `${plainReason(lastError, sawRateLimit)} Detail: ${lastError.slice(0, 220)}`,
+        link: "/invoice-scan", ref_type: "scanner_down",
+      }),
+    }, 3_000);
+  } catch (error) {
+    console.warn("Scanner-down alert failed:", error instanceof Error ? error.message : error);
+  }
+}
+
 function isTransientStatus(status: number) {
   return status === 408 || status === 429 || status === 500 ||
     status === 502 || status === 503 || status === 504;
@@ -207,6 +290,35 @@ serve(async (req) => {
     const authHeader = req.headers.get("Authorization") ?? "";
     const jwt = authHeader.replace(/^Bearer\s+/i, "");
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+
+    // Daily self-check from the database scheduler: a one-line request to
+    // the model the scanner would use, and an alert to the admin if it fails.
+    const healthToken = Deno.env.get("SCANNER_HEALTH_TOKEN");
+    if (healthToken && req.headers.get("x-health-token") === healthToken) {
+      const key = Deno.env.get("GEMINI_API_KEY");
+      if (!key) {
+        await alertScannerDown(null, "GEMINI_API_KEY not configured", false);
+        return new Response(JSON.stringify({ ok: false, error: "GEMINI_API_KEY not configured" }), { headers: corsHeaders });
+      }
+      modelCache = null;                       // re-ask Google every morning
+      const models = await pickModels(key);
+      const started = Date.now();
+      let error = "";
+      try {
+        const r = await fetchWithTimeout(
+          `https://generativelanguage.googleapis.com/v1beta/models/${models[0].name}:generateContent`,
+          { method: "POST", headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+            body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with the single word OK." }] }] }) },
+          25_000);
+        if (!r.ok) error = `${models[0].name} -> ${r.status}: ${(await r.text()).slice(0, 200)}`;
+      } catch (e) {
+        error = `${models[0].name} ${e instanceof DOMException && e.name === "AbortError" ? "timed out after 25000ms" : String(e)}`;
+      }
+      if (error) await alertScannerDown(null, error, /-> 429/.test(error));
+      return new Response(JSON.stringify({ ok: !error, models: models.map((m) => m.name), ms: Date.now() - started, error: error || null }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (!jwt || jwt === anonKey) {
       return new Response(JSON.stringify({ error: "Sign in to use the scanner." }), {
         status: 401,
@@ -308,8 +420,9 @@ serve(async (req) => {
 
     // One bounded attempt per fallback model. Transient failures back off before
     // trying the next model, keeping total attempts and total execution bounded.
-    for (let attempt = 0; attempt < MODELS.length; attempt += 1) {
-      const model = MODELS[attempt];
+    const models = await pickModels(geminiKey);
+    for (let attempt = 0; attempt < models.length; attempt += 1) {
+      const model = models[attempt];
       try {
         const response = await fetchWithTimeout(
           `https://generativelanguage.googleapis.com/v1beta/models/${model.name}:generateContent`,
@@ -364,6 +477,7 @@ serve(async (req) => {
           console.error("Gemini API error:", lastError);
           sawRateLimit ||= response.status === 429;
           sawTransient ||= isTransientStatus(response.status);
+          if (response.status === 404) modelCache = null;   // retired: ask Google again next time
         }
       } catch (error) {
         const timedOut = error instanceof DOMException && error.name === "AbortError";
@@ -379,6 +493,7 @@ serve(async (req) => {
     }
 
     if (!parsed) {
+      await alertScannerDown(typeof canteenId === "string" ? canteenId : null, lastError, sawRateLimit);
       return new Response(JSON.stringify({
         error: sawRateLimit
           ? "The scanner is temporarily rate-limited. Wait a minute and try again."
