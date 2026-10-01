@@ -6,7 +6,9 @@ import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMenuPlans, useSaveMenuPlan, useUpdateMenuPlanItem, useRecordMealCounts, useUncountedMeals, useDueToPublish, MEAL_PERIODS } from "@/hooks/useSrsData";
 import { todayIst } from "@/lib/date";
-import { useRecipes } from "@/hooks/useSupabaseData";
+import { useCanteens, useRecipes } from "@/hooks/useSupabaseData";
+import UnitCountsEntry from "@/components/UnitCountsEntry";
+import { countUnitsFor, unitTotals, unitValue, type UnitCounts } from "@/lib/unitCounts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +53,11 @@ export default function MenuPlanningPage() {
   const savePlan = useSaveMenuPlan();
   const updateItem = useUpdateMenuPlanItem();
   const recordCounts = useRecordMealCounts();
+  // Eicher counts plates unit by unit from 1 Oct; other sites and earlier
+  // days keep the single site figure.
+  const { data: canteens } = useCanteens();
+  const site = (canteens || []).find((c: any) => c.id === selectedCanteen) as any;
+  const countUnits = countUnitsFor(site, date);
   const { data: uncounted } = useUncountedMeals(selectedCanteen, 7);
   const { data: due } = useDueToPublish(selectedCanteen);
   const qc = useQueryClient();
@@ -178,6 +185,17 @@ export default function MenuPlanningPage() {
         ? `${punch} Eicher punch save hua — billing ab FINAL hai`
         : actual != null ? `${actual} actual served save hua — Eicher punch pending hai` : "Counts saved");
     } catch (e: any) { toast.error(e.message); }
+  };
+
+  const saveUnitCounts = async (plan: any, counts: UnitCounts, reason: string) => {
+    await recordCounts.mutateAsync({ id: plan.id, unitCounts: counts, reason });
+    const a = unitTotals(counts, countUnits, "actual");
+    const p = unitTotals(counts, countUnits, "punch");
+    toast.success(p.total != null
+      ? `Eicher punch total ${p.total} — billing ab FINAL hai`
+      : a.total != null
+        ? `Actual total ${a.total} save hua — Eicher punch ${p.of - p.entered} unit ka pending`
+        : `Save hua — ${a.of - a.entered} unit ka actual abhi pending`);
   };
 
   return (
@@ -320,6 +338,15 @@ export default function MenuPlanningPage() {
                           {plan.actual_headcount != null && <span className="text-accent">· Actual <b>{plan.actual_headcount}</b></span>}
                           {plan.company_punch_count != null && <span className="text-success">· Eicher final <b>{plan.company_punch_count}</b></span>}
                         </p>
+                        {countUnits.length > 0 && countUnits.some((u) => unitValue(plan.unit_counts, u, "actual") != null || unitValue(plan.unit_counts, u, "punch") != null) && (
+                          <p className="text-[11px] text-muted-foreground">
+                            {countUnits.map((u) => {
+                              const a = unitValue(plan.unit_counts, u, "actual");
+                              const pn = unitValue(plan.unit_counts, u, "punch");
+                              return `${u}: ${a ?? "—"}${pn != null ? ` / punch ${pn}` : ""}`;
+                            }).join(" · ")}
+                          </p>
+                        )}
                         {items.length === 0 ? (
                           <p className="text-xs text-muted-foreground">No dishes listed.</p>
                         ) : items.map((i: any) => (
@@ -375,7 +402,22 @@ export default function MenuPlanningPage() {
                     {/* Three separate numbers prevent an estimate or a manual
                         counter from silently becoming the customer's bill. */}
                     {plan && plan.status !== "draft" &&
-                     (canDoInitialDataEntry || (isManagerOrAbove && (plan.actual_headcount != null || plan.company_punch_count != null))) && (
+                     (canDoInitialDataEntry || (isManagerOrAbove && (plan.actual_headcount != null || plan.company_punch_count != null
+                       || countUnits.some((u) => unitValue(plan.unit_counts, u, "actual") != null || unitValue(plan.unit_counts, u, "punch") != null)))) && (
+                      countUnits.length > 0 ? (
+                      <div className="rounded-md border bg-muted/30 p-2 space-y-1.5">
+                        <p className="text-[10px] text-muted-foreground">Expected <b className="text-foreground">{plan.expected_headcount}</b> · Unit-wise plates</p>
+                        <UnitCountsEntry
+                          key={`${plan.id}-${JSON.stringify(plan.unit_counts || {})}`}
+                          plan={plan}
+                          units={countUnits}
+                          canFirst={canDoInitialDataEntry}
+                          canCorrect={isManagerOrAbove}
+                          saving={recordCounts.isPending}
+                          onSave={(counts, reason) => saveUnitCounts(plan, counts, reason)}
+                        />
+                      </div>
+                      ) : (
                       <div className="rounded-md border bg-muted/30 p-2 space-y-1.5">
                         <div className="grid grid-cols-3 gap-1 text-center text-[10px]">
                           <div className="rounded border bg-background p-1"><span className="text-muted-foreground">EXPECTED</span><b className="block text-xs">{plan.expected_headcount}</b></div>
@@ -426,6 +468,7 @@ export default function MenuPlanningPage() {
                           </Button>
                         </div>
                       </div>
+                      )
                     )}
                     {!isPast && ((isHeadSupervisor && (!plan || plan.status === "draft")) || isManagerOrAbove) && (
                       <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => openEditor(mp.value)}>

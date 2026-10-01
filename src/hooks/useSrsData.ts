@@ -273,20 +273,24 @@ export function useUpdateMenuPlanItem() {
 export function useRecordMealCounts() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, actual, companyPunch, reason }: {
+    mutationFn: async ({ id, actual, companyPunch, unitCounts, reason }: {
       id: string;
-      actual: number | null;
-      companyPunch: number | null;
+      actual?: number | null;
+      companyPunch?: number | null;
+      /** Sites counted by unit: the database derives the site totals. */
+      unitCounts?: Record<string, Record<string, number | null | undefined>>;
       reason?: string;
     }) => {
       const { data, error } = await supabase
         .from("menu_plans" as any)
-        .update({
-          actual_headcount: actual,
-          company_punch_count: companyPunch,
-          company_punch_source: "manual",
-          count_change_reason: reason?.trim() || null,
-        })
+        .update(unitCounts
+          ? { unit_counts: unitCounts, count_change_reason: reason?.trim() || null }
+          : {
+              actual_headcount: actual,
+              company_punch_count: companyPunch,
+              company_punch_source: "manual",
+              count_change_reason: reason?.trim() || null,
+            })
         .eq("id", id)
         .select("id");
       if (error) throw error;
