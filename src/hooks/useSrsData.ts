@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { clampToCutover, REPORTING_CUTOVER_DATE } from "@/lib/cutover";
 import { shiftIst, todayIst } from "@/lib/date";
+import { UNKNOWN_CATEGORY, type PurchaseLine } from "@/lib/purchaseDetail";
 
 // Data layer for the SRS modules: menu planning, requisition approval,
 // budgets, the vendor portal and inventory ageing. New tables are reached
@@ -482,6 +483,62 @@ export function useStoreSavings(canteenId?: string, from?: string, to?: string) 
   });
 }
 
+// One report per stock count (submit_stock_audit writes it). The manager and
+// above see every count at their sites; a store keeper sees their own.
+export interface StockAuditReport {
+  id: string;
+  canteen_id: string;
+  submitted_by: string | null;
+  submitted_at: string;
+  updated_at: string;
+  submissions: number;
+  counted_items: number;
+  matched_items: number;
+  surplus_items: number;
+  surplus_value: number;
+  shortage_items: number;
+  shortage_value: number;
+  net_value: number;
+  unpriced_items: number;
+  backfilled: boolean;
+  lines: {
+    ingredient_id: string; item: string; unit: string; category: string | null;
+    expected: number; counted: number; difference: number; rate: number; value: number; reason: string;
+  }[];
+}
+
+const STOCK_AUDIT_REPORT_COLUMNS =
+  "id, canteen_id, submitted_by, submitted_at, updated_at, submissions, counted_items, matched_items, surplus_items, surplus_value, shortage_items, shortage_value, net_value, unpriced_items, backfilled, lines";
+
+export function useStockAuditReports(canteenId?: string) {
+  return useQuery({
+    queryKey: ["stockAuditReports", canteenId],
+    enabled: !!canteenId,
+    queryFn: async () => {
+      let q = (supabase as any).from("stock_audit_reports").select(STOCK_AUDIT_REPORT_COLUMNS)
+        .order("submitted_at", { ascending: false }).limit(60);
+      if (canteenId !== "all") q = q.eq("canteen_id", canteenId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data || []) as StockAuditReport[];
+    },
+  });
+}
+
+// The report a notification links to, whichever site is selected.
+export function useStockAuditReport(id?: string | null) {
+  return useQuery({
+    queryKey: ["stockAuditReport", id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).from("stock_audit_reports")
+        .select(STOCK_AUDIT_REPORT_COLUMNS).eq("id", id).maybeSingle();
+      if (error) throw error;
+      return (data || null) as StockAuditReport | null;
+    },
+  });
+}
+
 export function useIssueRequisitionActual() {
   const qc = useQueryClient();
   return useMutation({
@@ -916,10 +973,13 @@ export function useStockAlertTrail(ingredientId?: string | null, at?: string | n
   });
 }
 
-export function useVegetablePurchaseReport(canteenId?: string, from?: string, to?: string) {
+// Every confirmed bill line in the dates, with its category, vendor and rate.
+// The page picks the category; nothing is dropped here, so a line whose item
+// has no category shows under "Unknown — check" instead of vanishing.
+export function usePurchaseLineReport(canteenId?: string, from?: string, to?: string) {
   const reportFrom = clampToCutover(from);
-  return useQuery({
-    queryKey: ["vegetablePurchaseReport", canteenId, reportFrom, to],
+  return useQuery<PurchaseLine[]>({
+    queryKey: ["purchaseLineReport", canteenId, reportFrom, to],
     enabled: !!canteenId && canteenId !== "all" && !!reportFrom && !!to,
     queryFn: async () => {
       const endExclusive = new Date(`${to}T00:00:00+05:30`);
@@ -936,10 +996,6 @@ export function useVegetablePurchaseReport(canteenId?: string, from?: string, to
 
       return (data || []).flatMap((purchase: any) =>
         (purchase.purchase_items || [])
-          .filter((line: any) => {
-            const category = String(line.ingredients?.category || "").trim().toLowerCase();
-            return category.includes("vegetable") || ["veg", "sabzi"].includes(category);
-          })
           .map((line: any) => ({
             purchase_id: purchase.id,
             purchase_item_id: line.id,
@@ -947,7 +1003,7 @@ export function useVegetablePurchaseReport(canteenId?: string, from?: string, to
             purchased_at: purchase.created_at,
             vendor_name: purchase.suppliers?.name || "Vendor nahi dala",
             item_name: line.ingredients?.name || line.item_name,
-            category: line.ingredients?.category || "Uncategorised",
+            category: line.ingredients?.category || UNKNOWN_CATEGORY,
             quantity: Number(line.quantity || 0),
             unit: line.unit || "unit",
             rate: Number(line.rate || 0),

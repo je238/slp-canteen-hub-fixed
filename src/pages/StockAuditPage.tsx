@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { fmtDate, todayIst } from "@/lib/date";
 import AppLayout from "@/components/AppLayout";
 import { useAppContext } from "@/contexts/AppContext";
 import { useIngredients, useStockLedger, useStockVarianceReport, useUserDirectory } from "@/hooks/useSupabaseData";
-import { useIngredientRates } from "@/hooks/useSrsData";
+import { useIngredientRates, useStockAuditReport, useStockAuditReports } from "@/hooks/useSrsData";
+import { StockAuditReportView } from "@/components/StockAuditReportView";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertTriangle, ClipboardCheck, Search, ShieldAlert, TrendingDown } from "lucide-react";
+import { AlertTriangle, ChevronDown, ClipboardCheck, FileText, Search, ShieldAlert, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 
 interface AuditEntry {
@@ -57,6 +59,23 @@ export default function StockAuditPage() {
 
   const items = ingredients || [];
 
+  // Every count becomes one report for the manager, admin and owner. A
+  // notification links here with ?report=<id>; that report opens whichever
+  // site is selected.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedReportId = searchParams.get("report");
+  const [tab, setTab] = useState(linkedReportId ? "reports" : "count");
+  const [openReport, setOpenReport] = useState<string | null>(linkedReportId);
+  const { data: reports, isLoading: reportsLoading } = useStockAuditReports(selectedCanteen);
+  const { data: linkedReport } = useStockAuditReport(linkedReportId);
+  useEffect(() => {
+    if (linkedReportId) { setTab("reports"); setOpenReport(linkedReportId); }
+  }, [linkedReportId]);
+  const reportList = [
+    ...(linkedReport && !(reports || []).some((r) => r.id === linkedReport.id) ? [linkedReport] : []),
+    ...(reports || []),
+  ];
+
   const startAudit = () => {
     setRevealed(false);
     setAuditEntries(
@@ -93,7 +112,7 @@ export default function StockAuditPage() {
       // each row separately AND ignored every error, so a refused write still
       // reported success and the counted variances were lost.
       const entries = auditEntries
-        .filter((e) => e.physicalStock !== "" && !isNaN(parseFloat(e.physicalStock)) && e.variance !== 0)
+        .filter((e) => e.physicalStock !== "" && !isNaN(parseFloat(e.physicalStock)))
         .map((e) => ({
           ingredient_id: e.ingredientId,
           counted: parseFloat(e.physicalStock),
@@ -109,13 +128,20 @@ export default function StockAuditPage() {
       qc.invalidateQueries({ queryKey: ["ingredients"] });
       qc.invalidateQueries({ queryKey: ["stockLedger"] });
       qc.invalidateQueries({ queryKey: ["ledgerSince"] });
+      qc.invalidateQueries({ queryKey: ["stockAuditReports"] });
+      qc.invalidateQueries({ queryKey: ["stockAuditReport"] });
       const res = data as any;
+      const rs = (v: any) => `₹${Math.round(Number(v) || 0).toLocaleString("en-IN")}`;
       toast.success(
-        `Audit recorded — ${res?.adjusted ?? 0} items corrected` +
-        (Number(res?.shortage_qty) > 0 ? `, shortages raised as alerts` : "")
+        `Ginti save — ${res?.adjusted ?? 0} items theek kiye. Zyada ${res?.surplus_items ?? 0} items ${rs(res?.surplus_value)}, ` +
+        `kam ${res?.shortage_items ?? 0} items ${rs(res?.shortage_value)}. Report manager/admin ko bhej di.`
       );
       setAuditEntries([]);
       setRevealed(false);
+      if (res?.report_id) {
+        setOpenReport(res.report_id);
+        setTab("reports");
+      }
     } catch (err: any) {
       toast.error(err.message || "Audit could not be saved");
     } finally {
@@ -123,6 +149,7 @@ export default function StockAuditPage() {
     }
   };
 
+  const countedEntries = auditEntries.filter((e) => e.physicalStock !== "" && !isNaN(parseFloat(e.physicalStock)));
   const mismatches = auditEntries.filter((e) => {
     const p = parseFloat(e.physicalStock);
     return !isNaN(p) && e.variance !== 0;
@@ -188,9 +215,13 @@ export default function StockAuditPage() {
           </Card>
         </div>
 
-        <Tabs defaultValue="count">
-          <TabsList>
+        <Tabs value={tab} onValueChange={(v) => {
+          setTab(v);
+          if (v !== "reports" && linkedReportId) { searchParams.delete("report"); setSearchParams(searchParams, { replace: true }); }
+        }}>
+          <TabsList className="flex-wrap h-auto">
             <TabsTrigger value="count">Physical Count</TabsTrigger>
+            <TabsTrigger value="reports">Verification Reports{reportList.length ? ` (${reportList.length})` : ""}</TabsTrigger>
             <TabsTrigger value="variance">Variance Report</TabsTrigger>
           </TabsList>
 
@@ -327,7 +358,7 @@ export default function StockAuditPage() {
                       Lock counts &amp; reveal variance
                     </Button>
                   ) : (
-                    <Button size="sm" onClick={submitAudit} disabled={submitting || mismatches.length === 0}>
+                    <Button size="sm" onClick={submitAudit} disabled={submitting || countedEntries.length === 0}>
                       {submitting ? "Saving..." : "Submit Audit"}
                     </Button>
                   )}
@@ -377,6 +408,40 @@ export default function StockAuditPage() {
             </CardContent>
           </Card>
         )}
+          </TabsContent>
+
+          <TabsContent value="reports" className="mt-3 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Har ginti ki report — kitne item zyada nikle aur unki value, kitne kam nikle aur unki value.
+              Store keeper ke submit karte hi ye manager, admin aur owner ko notification me jaati hai.
+              2 ghante ke andar ki ginti ek hi report me judti hai.
+            </p>
+            {reportsLoading && !reportList.length ? (
+              <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Reports load ho rahi hain…</CardContent></Card>
+            ) : reportList.length === 0 ? (
+              <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Abhi koi stock verification report nahi.</CardContent></Card>
+            ) : reportList.map((r) => {
+              const open = openReport === r.id;
+              return (
+                <Card key={r.id} className={open ? "border-primary/40" : ""}>
+                  <button type="button" className="w-full text-left p-3 flex flex-wrap items-center gap-x-4 gap-y-1"
+                    onClick={() => setOpenReport(open ? null : r.id)}>
+                    <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`} />
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
+                      <FileText className="w-4 h-4 text-muted-foreground" />
+                      {fmtDate(r.submitted_at)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{r.counted_items} gine · {who(r.submitted_by)}</span>
+                    <span className="text-xs text-success">Zyada {r.surplus_items} · ₹{Math.round(r.surplus_value).toLocaleString("en-IN")}</span>
+                    <span className="text-xs text-destructive">Kam {r.shortage_items} · ₹{Math.round(r.shortage_value).toLocaleString("en-IN")}</span>
+                    <span className={`ml-auto text-sm font-semibold ${r.net_value < 0 ? "text-destructive" : "text-success"}`}>
+                      Net {r.net_value < 0 ? "−" : "+"}₹{Math.abs(Math.round(r.net_value)).toLocaleString("en-IN")}
+                    </span>
+                  </button>
+                  {open && <CardContent className="pt-0 pb-4"><StockAuditReportView report={r} who={who(r.submitted_by)} /></CardContent>}
+                </Card>
+              );
+            })}
           </TabsContent>
 
           <TabsContent value="variance" className="mt-3 space-y-4">

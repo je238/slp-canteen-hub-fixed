@@ -93,7 +93,8 @@ export const NAV: NavEntry[] = [
   { path: "/meal-profit", label: "Meal Profit", icon: BarChart3, roles: MANAGER_READ },
   { path: "/site-performance", label: "Site Performance", icon: LayoutDashboard,
     roles: ["ops_manager", ...ADMIN_UP] },
-  { path: "/stock-audit", label: "Stock Verification", icon: ClipboardCheck, roles: STORE_AND_ADMIN },
+  // Managers too: every count is reported to them, and the notification links here.
+  { path: "/stock-audit", label: "Stock Verification", icon: ClipboardCheck, roles: ["store_keeper", ...MANAGER_READ] },
 
   // Administration
   { path: "/canteens", label: "Sites", icon: Building2,

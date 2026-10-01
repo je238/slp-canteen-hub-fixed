@@ -25,6 +25,7 @@ describe("Head Supervisor and Manager access", () => {
       "/vendors",
       "/reports-center",
       "/meal-profit",
+      "/stock-audit",
       "/canteens",
       "/executive-alerts",
     ]);

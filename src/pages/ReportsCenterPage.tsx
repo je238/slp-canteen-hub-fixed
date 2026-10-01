@@ -6,9 +6,10 @@ import {
   usePurchaseReport, useConsumptionReport, useOperationsSummary, useStockAgeing,
   useStockInOutReport, usePeriodSummary,
   useWastageLog, useOwnerMenuProfitBreakdown, useMenuPlans,
-  useDailyItemUsageRateTrend, useItemPurchaseRateHistory, usePeriodPurchaseRateChanges, useVegetablePurchaseReport,
+  useDailyItemUsageRateTrend, useItemPurchaseRateHistory, usePeriodPurchaseRateChanges, usePurchaseLineReport,
   usePurchaseByCategory,
 } from "@/hooks/useSrsData";
+import { categoryTotals, summariseByItem } from "@/lib/purchaseDetail";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useIngredients } from "@/hooks/useSupabaseData";
@@ -131,8 +132,13 @@ export default function ReportsCenterPage() {
       ? requestedTab : canViewProfit ? "profit" : "purchase");
 
   const { data: purchase } = usePurchaseReport(selectedCanteen, from, to);
-  const { data: vegetablePurchases, isLoading: vegetablePurchasesLoading } =
-    useVegetablePurchaseReport(selectedCanteen, from, to);
+  const { data: purchaseLines, isLoading: purchaseLinesLoading } =
+    usePurchaseLineReport(selectedCanteen, from, to);
+  // "all" or one category; "items" sums each item with its vendors and
+  // rates, "lines" lists every bill line.
+  const [detailCategory, setDetailCategory] = useState("Vegetables & Fruits");
+  const [detailView, setDetailView] = useState<"items" | "lines">("items");
+  const [expandedDetailItem, setExpandedDetailItem] = useState<string | null>(null);
   const { data: byCategory } = usePurchaseByCategory(selectedCanteen, from, to);
   const { data: consumption } = useConsumptionReport(selectedCanteen, from, to);
   const { data: ops } = useOperationsSummary(selectedCanteen, from, to);
@@ -218,13 +224,8 @@ export default function ReportsCenterPage() {
   const byVendor = pick(purchase, "vendor");
   const byItem = pick(purchase, "item");
   const byDay = pick(purchase, "day");
-  const vegetableRows = (vegetablePurchases || []) as any[];
-  const vegetableSummary = useMemo(() => ({
-    amount: vegetableRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
-    purchases: new Set(vegetableRows.map((row) => row.purchase_id)).size,
-    vendors: new Set(vegetableRows.map((row) => row.vendor_name)).size,
-    items: new Set(vegetableRows.map((row) => row.item_name)).size,
-  }), [vegetablePurchases]);
+  const allPurchaseLines = purchaseLines || [];
+  const detailCategories = useMemo(() => categoryTotals(purchaseLines || []), [purchaseLines]);
   const consByItem = pick(consumption, "item");
   const consByDay = pick(consumption, "day");
   const itemTrendRows = useMemo(() => {
@@ -329,8 +330,17 @@ export default function ReportsCenterPage() {
   const matchesSearch = (...values: any[]) => !searchText || values
     .filter((value) => value != null)
     .some((value) => String(value).toLowerCase().includes(searchText));
-  const visibleVegetableRows = vegetableRows.filter((row: any) =>
-    matchesSearch(row.item_name, row.vendor_name, row.purchase_date, row.unit));
+  const visibleDetailRows = allPurchaseLines.filter((row) =>
+    (detailCategory === "all" || row.category === detailCategory)
+      && matchesSearch(row.item_name, row.vendor_name, row.purchase_date, row.unit));
+  const detailItems = summariseByItem(visibleDetailRows);
+  const detailSummary = {
+    amount: visibleDetailRows.reduce((sum, row) => sum + row.amount, 0),
+    purchases: new Set(visibleDetailRows.map((row) => row.purchase_id)).size,
+    vendors: new Set(visibleDetailRows.map((row) => row.vendor_name)).size,
+    items: detailItems.length,
+  };
+  const detailLabel = detailCategory === "all" ? "Sab saman" : detailCategory;
   const visibleVendors = byVendor.filter((row: any) => matchesSearch(row.label));
   const visiblePurchaseItems = byItem.filter((row: any) => matchesSearch(row.label, row.unit));
   const visibleStockMove = (stockMove || []).filter((row: any) =>
@@ -926,8 +936,12 @@ export default function ReportsCenterPage() {
                         </TableRow></TableHeader>
                         <TableBody>
                           {byCategory.groups.map((g) => (
-                            <TableRow key={g.group}>
-                              <TableCell className="font-medium whitespace-nowrap">{g.group}</TableCell>
+                            <TableRow key={g.group} className="cursor-pointer"
+                              onClick={() => {
+                                setDetailCategory(g.group); setDetailView("items"); setExpandedDetailItem(null);
+                                document.getElementById("category-purchase-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                              }}>
+                              <TableCell className="font-medium whitespace-nowrap text-primary underline-offset-2 hover:underline">{g.group}</TableCell>
                               <TableCell className="text-right tabular-nums">{money(g.amount)}</TableCell>
                               <TableCell className="text-right tabular-nums">{byCategory.lines_total ? (g.amount / byCategory.lines_total * 100).toFixed(1) : "0"}%</TableCell>
                               <TableCell className="text-right tabular-nums">{g.items}</TableCell>
@@ -947,53 +961,129 @@ export default function ReportsCenterPage() {
                 )}
               </CardContent>
             </Card>
-            <Card className="border-none shadow-sm">
+            {/* What was bought inside one category: every item with its total
+                quantity, the average paid and the cheapest/dearest rate, and
+                the vendors it came from at their own rates — or every bill
+                line. Covers every category, not only vegetables. */}
+            <Card id="category-purchase-detail" className="border-none shadow-sm scroll-mt-20">
               <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2">
                 <div>
-                  <CardTitle className="text-sm">Vegetable purchase detail</CardTitle>
-                  <p className="mt-1 text-xs text-muted-foreground">Selected dates me kis vendor se, kitni quantity aur kis rate par vegetables aaye.</p>
+                  <CardTitle className="text-sm">Category purchase detail — kya kharida, kis vendor se, kis rate par</CardTitle>
+                  <p className="mt-1 text-xs text-muted-foreground">Category chuno. Item pe click karo to dikhega kis vendor se kitna aur kis rate par aaya.</p>
                 </div>
                 <Button variant="outline" size="sm" className="text-xs"
-                  disabled={!visibleVegetableRows.length}
-                  onClick={() => exportCsv(`vegetable-purchase-${from}_${to}.csv`, [
-                    ["Purchase date", "Vendor", "Item", "Quantity", "Unit", "Rate", "Amount"],
-                    ...visibleVegetableRows.map((r: any) => [r.purchase_date, r.vendor_name, r.item_name, num(r.quantity), r.unit, num(r.rate), Math.round(Number(r.amount || 0))]),
-                  ])}>
+                  disabled={!visibleDetailRows.length}
+                  onClick={() => detailView === "items"
+                    ? exportCsv(`purchase-items-${detailLabel}-${from}_${to}.csv`, [
+                        ["Category", "Item", "Unit", "Quantity", "Amount", "Avg rate", "Min rate", "Max rate", "Bills", "Vendor", "Vendor qty", "Vendor amount", "Vendor avg rate"],
+                        ...detailItems.flatMap((it) => it.vendors.map((v, i) => [
+                          i === 0 ? it.category : "", i === 0 ? it.item : "", it.unit,
+                          i === 0 ? it.qty : "", i === 0 ? Math.round(it.amount) : "", i === 0 ? it.avgRate ?? "" : "",
+                          i === 0 ? it.minRate ?? "" : "", i === 0 ? it.maxRate ?? "" : "", i === 0 ? it.bills : "",
+                          v.vendor, v.qty, Math.round(v.amount), v.avgRate ?? "",
+                        ])),
+                      ])
+                    : exportCsv(`purchase-lines-${detailLabel}-${from}_${to}.csv`, [
+                        ["Purchase date", "Category", "Vendor", "Item", "Quantity", "Unit", "Rate", "Amount"],
+                        ...visibleDetailRows.map((r) => [r.purchase_date, r.category, r.vendor_name, r.item_name, num(r.quantity), r.unit, num(r.rate), Math.round(r.amount)]),
+                      ])}>
                   <Download className="w-3.5 h-3.5 mr-1" /> CSV
                 </Button>
               </CardHeader>
               <CardContent className="space-y-3">
+                <div className="flex flex-wrap gap-1.5">
+                  {[{ category: "all", amount: detailCategories.reduce((s, c) => s + c.amount, 0) }, ...detailCategories].map((c) => (
+                    <Button key={c.category} size="sm" variant={detailCategory === c.category ? "default" : "outline"}
+                      className="h-7 text-xs" onClick={() => { setDetailCategory(c.category); setExpandedDetailItem(null); }}>
+                      {c.category === "all" ? "Sab" : c.category} · {money(c.amount)}
+                    </Button>
+                  ))}
+                </div>
                 <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                   {[
-                    ["Vegetable purchase", money(vegetableSummary.amount)],
-                    ["Purchase bills", vegetableSummary.purchases],
-                    ["Vendors", vegetableSummary.vendors],
-                    ["Vegetable items", vegetableSummary.items],
+                    [`${detailLabel} — kharida`, money(detailSummary.amount)],
+                    ["Bills", detailSummary.purchases],
+                    ["Vendors", detailSummary.vendors],
+                    ["Items", detailSummary.items],
                   ].map(([label, value]) => <div key={String(label)} className="rounded-lg bg-muted/60 p-3"><p className="text-[10px] text-muted-foreground">{label}</p><p className="font-bold">{value}</p></div>)}
                 </div>
-                <div className="max-h-[28rem] overflow-auto rounded-lg border">
-                  <Table>
-                    <TableHeader><TableRow>
-                      <TableHead className="text-xs whitespace-nowrap">Date</TableHead>
-                      <TableHead className="text-xs">Vendor</TableHead>
-                      <TableHead className="text-xs">Vegetable</TableHead>
-                      <TableHead className="text-xs text-right whitespace-nowrap">Quantity</TableHead>
-                      <TableHead className="text-xs text-right whitespace-nowrap">Rate</TableHead>
-                      <TableHead className="text-xs text-right whitespace-nowrap">Total</TableHead>
-                    </TableRow></TableHeader>
-                    <TableBody>
-                      {vegetablePurchasesLoading ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Vegetable purchases load ho rahe hain…</TableCell></TableRow>
-                        : visibleVegetableRows.length === 0 ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Search ya selected dates me vegetable purchase nahi mili.</TableCell></TableRow>
-                        : visibleVegetableRows.map((r: any) => <TableRow key={r.purchase_item_id}>
-                          <TableCell className="text-xs whitespace-nowrap">{purchaseTime(r.purchased_at)}</TableCell>
-                          <TableCell className="text-sm">{r.vendor_name}</TableCell>
-                          <TableCell className="text-sm font-medium">{r.item_name}</TableCell>
-                          <TableCell className="text-sm text-right whitespace-nowrap">{num(r.quantity)} {r.unit}</TableCell>
-                          <TableCell className="text-sm text-right whitespace-nowrap">₹{num(r.rate)}/{r.unit}</TableCell>
-                          <TableCell className="text-sm text-right font-semibold whitespace-nowrap">{money(r.amount)}</TableCell>
-                        </TableRow>)}
-                    </TableBody>
-                  </Table>
+                <div className="flex gap-1.5">
+                  <Button size="sm" variant={detailView === "items" ? "default" : "outline"} className="h-7 text-xs" onClick={() => setDetailView("items")}>Item-wise (vendor + rate)</Button>
+                  <Button size="sm" variant={detailView === "lines" ? "default" : "outline"} className="h-7 text-xs" onClick={() => setDetailView("lines")}>Har bill line</Button>
+                </div>
+                <div className="max-h-[32rem] overflow-auto rounded-lg border">
+                  {detailView === "items" ? (
+                    <Table>
+                      <TableHeader><TableRow>
+                        <TableHead className="text-xs">Item</TableHead>
+                        <TableHead className="text-xs text-right whitespace-nowrap">Kitna aaya</TableHead>
+                        <TableHead className="text-xs text-right whitespace-nowrap">Avg rate</TableHead>
+                        <TableHead className="text-xs text-right whitespace-nowrap">Kam / zyada rate</TableHead>
+                        <TableHead className="text-xs text-right whitespace-nowrap">Total</TableHead>
+                        <TableHead className="text-xs">Vendor</TableHead>
+                      </TableRow></TableHeader>
+                      <TableBody>
+                        {purchaseLinesLoading ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Purchases load ho rahe hain…</TableCell></TableRow>
+                          : detailItems.length === 0 ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Is category / search me in dates koi purchase nahi.</TableCell></TableRow>
+                          : detailItems.map((it) => {
+                            const open = expandedDetailItem === it.key;
+                            return (
+                              <Fragment key={it.key}>
+                                <TableRow className="cursor-pointer" onClick={() => setExpandedDetailItem(open ? null : it.key)}>
+                                  <TableCell className="text-sm font-medium">
+                                    <ChevronDown className={`inline w-3.5 h-3.5 mr-1 transition-transform ${open ? "" : "-rotate-90"}`} />
+                                    {it.item}
+                                    {detailCategory === "all" && <span className="ml-1 text-[10px] text-muted-foreground">{it.category}</span>}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-right whitespace-nowrap">{num(it.qty)} {it.unit}</TableCell>
+                                  <TableCell className="text-sm text-right whitespace-nowrap">{it.avgRate != null ? `₹${it.avgRate}/${it.unit}` : "—"}</TableCell>
+                                  <TableCell className={`text-xs text-right whitespace-nowrap ${it.minRate != null && it.maxRate != null && it.maxRate > it.minRate * 1.2 ? "text-warning font-medium" : "text-muted-foreground"}`}>
+                                    {it.minRate == null ? "—" : it.minRate === it.maxRate ? `₹${it.minRate}` : `₹${it.minRate} – ₹${it.maxRate}`}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-right font-semibold whitespace-nowrap">{money(it.amount)}</TableCell>
+                                  <TableCell className="text-xs text-muted-foreground">
+                                    {it.vendors.length === 1 ? it.vendors[0].vendor : `${it.vendors.length} vendors`} · {it.bills} bill
+                                  </TableCell>
+                                </TableRow>
+                                {open && it.vendors.map((v) => (
+                                  <TableRow key={`${it.key}|${v.vendor}`} className="bg-muted/40">
+                                    <TableCell className="text-xs pl-8">{v.vendor}</TableCell>
+                                    <TableCell className="text-xs text-right whitespace-nowrap">{num(v.qty)} {it.unit}</TableCell>
+                                    <TableCell className="text-xs text-right whitespace-nowrap">{v.avgRate != null ? `₹${v.avgRate}/${it.unit}` : "—"}</TableCell>
+                                    <TableCell />
+                                    <TableCell className="text-xs text-right whitespace-nowrap">{money(v.amount)}</TableCell>
+                                    <TableCell className="text-xs text-muted-foreground">{v.bills} bill</TableCell>
+                                  </TableRow>
+                                ))}
+                              </Fragment>
+                            );
+                          })}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <Table>
+                      <TableHeader><TableRow>
+                        <TableHead className="text-xs whitespace-nowrap">Date</TableHead>
+                        <TableHead className="text-xs">Vendor</TableHead>
+                        <TableHead className="text-xs">Item</TableHead>
+                        <TableHead className="text-xs text-right whitespace-nowrap">Quantity</TableHead>
+                        <TableHead className="text-xs text-right whitespace-nowrap">Rate</TableHead>
+                        <TableHead className="text-xs text-right whitespace-nowrap">Total</TableHead>
+                      </TableRow></TableHeader>
+                      <TableBody>
+                        {purchaseLinesLoading ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Purchases load ho rahe hain…</TableCell></TableRow>
+                          : visibleDetailRows.length === 0 ? <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">Is category / search me in dates koi purchase nahi.</TableCell></TableRow>
+                          : visibleDetailRows.map((r) => <TableRow key={r.purchase_item_id}>
+                            <TableCell className="text-xs whitespace-nowrap">{purchaseTime(r.purchased_at)}</TableCell>
+                            <TableCell className="text-sm">{r.vendor_name}</TableCell>
+                            <TableCell className="text-sm font-medium">{r.item_name}</TableCell>
+                            <TableCell className="text-sm text-right whitespace-nowrap">{num(r.quantity)} {r.unit}</TableCell>
+                            <TableCell className="text-sm text-right whitespace-nowrap">₹{num(r.rate)}/{r.unit}</TableCell>
+                            <TableCell className="text-sm text-right font-semibold whitespace-nowrap">{money(r.amount)}</TableCell>
+                          </TableRow>)}
+                      </TableBody>
+                    </Table>
+                  )}
                 </div>
               </CardContent>
             </Card>
