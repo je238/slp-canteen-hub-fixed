@@ -408,7 +408,7 @@ serve(async (req) => {
         responseMimeType: "application/json",
         responseSchema: isMenu ? MENU_SCHEMA : RESPONSE_SCHEMA,
         temperature: 0,
-        ...(lowThinking ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
+        ...(lowThinking ? { thinkingConfig: { thinkingLevel: "medium" } } : {}),
       },
     });
     let lowThinking = true;
@@ -420,9 +420,18 @@ serve(async (req) => {
 
     // One bounded attempt per fallback model. Transient failures back off before
     // trying the next model, keeping total attempts and total execution bounded.
-    const models = await pickModels(geminiKey);
+    // Flash reads handwriting; Lite mostly cannot. When Flash hiccups (an
+    // empty answer, a 503) it gets a second go before Lite is tried — going
+    // straight to Lite turned one bad second at Google into a failed scan.
+    // 45 + 40 + 20 s stays inside the app's 120 s wait.
+    const found = await pickModels(geminiKey);
+    const models: Model[] = found.length > 1
+      ? [{ ...found[0], timeoutMs: 45_000 }, { ...found[0], timeoutMs: 40_000 }, { ...found[1], timeoutMs: 20_000 }]
+      : [{ ...found[0], timeoutMs: 55_000 }, { ...found[0], timeoutMs: 50_000 }];
+    const retired = new Set<string>();
     for (let attempt = 0; attempt < models.length; attempt += 1) {
       const model = models[attempt];
+      if (retired.has(model.name)) continue;
       try {
         const response = await fetchWithTimeout(
           `https://generativelanguage.googleapis.com/v1beta/models/${model.name}:generateContent`,
@@ -477,7 +486,7 @@ serve(async (req) => {
           console.error("Gemini API error:", lastError);
           sawRateLimit ||= response.status === 429;
           sawTransient ||= isTransientStatus(response.status);
-          if (response.status === 404) modelCache = null;   // retired: ask Google again next time
+          if (response.status === 404) { modelCache = null; retired.add(model.name); }   // retired: skip it, ask Google again next time
         }
       } catch (error) {
         const timedOut = error instanceof DOMException && error.name === "AbortError";

@@ -98,9 +98,9 @@ export async function scanBase64(
   let res: Response | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     const controller = new AbortController();
-    // A handwritten bill takes ~45 s and the server allows up to ~105 s.
+    // A handwritten bill takes ~45 s and the server allows up to ~105 s (Flash twice, then Lite).
     // Waiting 75 s and then starting over made a slow scan a 150 s failure.
-    const timeout = setTimeout(() => controller.abort(), 115_000);
+    const timeout = setTimeout(() => controller.abort(), 120_000);
     try {
       res = await fetch(url, {
         method: "POST",
