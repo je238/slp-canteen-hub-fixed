@@ -760,7 +760,9 @@ export default function PurchasesPage() {
               {groupOpen&&<div className="space-y-2 border-t bg-muted/20 p-2 sm:p-3">
               {group.purchases.map((p: any) => {
               const billFiles: any[] = p.purchase_invoice_files || [];
-              const billPending = p.bill_status === "pending" || (!p.invoice_image_url && billFiles.length === 0);
+              const fromSun = String(p.source || "vendor").startsWith("sun_pharma");
+              // A Sun Pharma transfer has no paper bill to chase.
+              const billPending = !fromSun && (p.bill_status === "pending" || (!p.invoice_image_url && billFiles.length === 0));
               return (
               <Card key={p.id} className="border-none shadow-sm">
                 <CardContent className="p-4">
@@ -777,7 +779,9 @@ export default function PurchasesPage() {
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedPurchase === p.id ? "rotate-180" : ""}`} />
                       </button>
                       <span className="min-w-0 break-words text-xs text-muted-foreground">• {p.suppliers?.name || "No supplier"}</span>
-                      {billPending
+                      {fromSun
+                        ? <span className="rounded-full bg-sky-100 text-sky-800 px-2 py-0.5 text-[10px] font-semibold">{p.source === "sun_pharma_return" ? "SUN PHARMA KO WAPAS" : "SUN PHARMA SE AAYA"}</span>
+                        : billPending
                         ? <span className="rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-semibold">BILL PENDING</span>
                         : <span className="rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10px] font-semibold">{Math.max(1, billFiles.length)} BILL</span>}
                     </div>
@@ -785,7 +789,7 @@ export default function PurchasesPage() {
                     </div>
                     <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
                       {billFiles.length === 0 && <InvoiceImageButton path={p.invoice_image_url} />}
-                      {canManagePurchases && (billPending || !p.bill_finalized_at || billFiles.length < 4) && (
+                      {canManagePurchases && !fromSun && (billPending || !p.bill_finalized_at || billFiles.length < 4) && (
                         <Button size="sm" variant={billPending ? "default" : "outline"} className="w-full justify-center gap-1 text-xs sm:w-auto" onClick={() => setBillPurchase(p)}>
                           <Paperclip className="h-3.5 w-3.5" /> {billPending && billFiles.length === 0 && !p.invoice_image_url ? "Bill aaya — upload" : !p.bill_finalized_at ? "Bill rates/GST final karo" : "Aur bill lagao"}
                         </Button>

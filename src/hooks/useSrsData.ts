@@ -80,6 +80,8 @@ export function useReceiveCentralKitchenTransfer() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["centralKitchenTransfers"] });
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["sunPharmaStock"] });
       qc.invalidateQueries({ queryKey: ["ingredients"] });
       qc.invalidateQueries({ queryKey: ["inventory"] });
       qc.invalidateQueries({ queryKey: ["dailyOperatingSnapshot"] });
@@ -99,6 +101,8 @@ export function useReturnCentralKitchenTransfer() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["centralKitchenTransfers"] });
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["sunPharmaStock"] });
       qc.invalidateQueries({ queryKey: ["ingredients"] });
       qc.invalidateQueries({ queryKey: ["inventory"] });
       qc.invalidateQueries({ queryKey: ["dailyOperatingSnapshot"] });
@@ -125,6 +129,8 @@ export function useLendCentralKitchenTransfer() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["centralKitchenTransfers"] });
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["sunPharmaStock"] });
       qc.invalidateQueries({ queryKey: ["ingredients"] });
       qc.invalidateQueries({ queryKey: ["inventory"] });
       qc.invalidateQueries({ queryKey: ["ingredientRates"] });
@@ -146,6 +152,8 @@ export function useReceiveBackCentralKitchenTransfer() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["centralKitchenTransfers"] });
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["sunPharmaStock"] });
       qc.invalidateQueries({ queryKey: ["ingredients"] });
       qc.invalidateQueries({ queryKey: ["inventory"] });
       qc.invalidateQueries({ queryKey: ["ingredientRates"] });
@@ -489,6 +497,22 @@ export function useStoreSavings(canteenId?: string, from?: string, to?: string) 
 
 // One report per stock count (submit_stock_audit writes it). The manager and
 // above see every count at their sites; a store keeper sees their own.
+// What of each item on a site's shelf came from Sun Pharma and is still
+// there (the lots its transfers opened), keyed by ingredient id.
+export function useSunPharmaStock(canteenId?: string) {
+  return useQuery({
+    queryKey: ["sunPharmaStock", canteenId],
+    enabled: !!canteenId && canteenId !== "all",
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("sun_pharma_stock" as any, { p_canteen_id: canteenId });
+      if (error) throw error;
+      return Object.fromEntries(((data || []) as { ingredient_id: string; qty: number; value: number }[])
+        .map((row) => [row.ingredient_id, row])) as Record<string, { ingredient_id: string; qty: number; value: number }>;
+    },
+  });
+}
+
 export interface StockAuditReport {
   id: string;
   canteen_id: string;

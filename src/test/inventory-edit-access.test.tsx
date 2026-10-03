@@ -16,7 +16,7 @@ vi.mock("@/hooks/useSupabaseData", () => ({
   useAddIngredient: () => ({}),
 }));
 vi.mock("@/hooks/useSrsData", () => ({
-  useIngredientRates: () => ({ data: [] }), useSaveInventoryItemEdit: () => ({}), useRenameIngredient: () => ({}), useDeleteIngredient: () => ({}),
+  useIngredientRates: () => ({ data: [] }), useSaveInventoryItemEdit: () => ({}), useRenameIngredient: () => ({}), useDeleteIngredient: () => ({}), useSunPharmaStock: () => ({ data: {} }),
 }));
 afterEach(cleanup);
 describe("manual inventory edit permission", () => {

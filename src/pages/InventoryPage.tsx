@@ -16,7 +16,7 @@ import DailyRegister from "@/components/DailyRegister";
 import DuplicateItems from "@/components/DuplicateItems";
 import DeliverySchedule from "@/components/DeliverySchedule";
 import HistoricalUnitReview from "@/components/HistoricalUnitReview";
-import { useIngredientRates, useSaveInventoryItemEdit, useRenameIngredient, useDeleteIngredient } from "@/hooks/useSrsData";
+import { useIngredientRates, useSaveInventoryItemEdit, useRenameIngredient, useDeleteIngredient, useSunPharmaStock } from "@/hooks/useSrsData";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const ingredientCategories = ["Grains", "Vegetables", "Meat", "Dairy", "Oils", "Spices", "Staples", "Beverages", "Other"];
@@ -44,6 +44,7 @@ export default function InventoryPage() {
   // quoted and the store is charged, so the inventory page cannot disagree
   // with the order screen.
   const { data: rates } = useIngredientRates(selectedCanteen);
+  const { data: sunStock } = useSunPharmaStock(selectedCanteen);
   const rateOf = (id: string) => (rates || []).find((r: any) => r.ingredient_id === id);
   const addIngredient = useAddIngredient();
   const saveInventoryEdit = useSaveInventoryItemEdit();
@@ -323,7 +324,13 @@ export default function InventoryPage() {
                         <tr key={item.id} className="border-b last:border-0 hover:bg-muted/50">
                           <td className="py-2.5 font-medium">{item.name}</td>
                           <td className="py-2.5 text-muted-foreground">{item.category}</td>
-                          <td className="py-2.5 text-right font-medium">{Number(item.current_stock)} {item.unit}</td>
+                          <td className="py-2.5 text-right font-medium">
+                            {Number(item.current_stock)} {item.unit}
+                            {sunStock?.[item.id] && Number(sunStock[item.id].qty) > 0 && (
+                              <span className="block text-[10px] font-normal text-sky-700" title="Is item ka itna maal Sun Pharma se aaya hai aur abhi shelf par hai">
+                                Sun Pharma ka {Number(sunStock[item.id].qty)} {item.unit}
+                              </span>)}
+                          </td>
                           <td className="py-2.5 text-right text-muted-foreground whitespace-nowrap">
                             {(() => {
                               const r = rateOf(item.id);
