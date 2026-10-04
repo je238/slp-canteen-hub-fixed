@@ -89,11 +89,21 @@ BEGIN
     RAISE EXCEPTION 'Add at least one received item';
   END IF;
 
+  -- The value is known before the purchase row exists, so the "goods received"
+  -- notice the insert raises carries the real amount, not ₹0.
+  SELECT coalesce(sum(round(q.qty * coalesce(nullif(public.provisional_rate(i.id), 0), greatest(coalesce(q.typed, 0), 0)), 2)), 0)
+    INTO v_sum
+    FROM (SELECT (e->>'ingredient_id')::uuid AS id, coalesce((e->>'quantity')::numeric, 0) AS qty,
+                 nullif(e->>'rate', '')::numeric AS typed
+            FROM jsonb_array_elements(p_items) e) q
+    JOIN public.ingredients i ON i.id = q.id AND i.canteen_id = p_canteen_id
+   WHERE q.qty > 0;
+
   INSERT INTO public.purchases
     (canteen_id, supplier_id, total_amount, stated_total, notes,
      invoice_image_url, status, approved_at, created_by, bill_status)
   VALUES
-    (p_canteen_id, p_supplier_id, 0, NULL,
+    (p_canteen_id, p_supplier_id, v_sum, NULL,
      concat('NO BILL — ', coalesce(nullif(btrim(p_notes), ''), 'bill will be attached later')),
      NULL, 'confirmed', now(), auth.uid(), 'pending')
   RETURNING id INTO v_purchase;
@@ -150,13 +160,10 @@ BEGIN
       (v_ing.id, p_canteen_id, p_supplier_id, v_purchase,
        v_line.qty, v_line.qty, v_rate);
 
-    v_sum := v_sum + round(v_line.qty * v_rate, 2);
     v_count := v_count + 1;
   END LOOP;
 
   IF v_count = 0 THEN RAISE EXCEPTION 'Add at least one positive quantity'; END IF;
-
-  UPDATE public.purchases SET total_amount = v_sum WHERE id = v_purchase;
 
   PERFORM public.notify_goods_received(v_purchase);
   RETURN jsonb_build_object(
@@ -206,7 +213,8 @@ BEGIN
       FROM public.purchases p LEFT JOIN public.suppliers s ON s.id = p.supplier_id
      WHERE p.canteen_id = p_canteen_id AND p.status = 'confirmed' AND p.created_at >= v_since
   ), lines AS (
-    SELECT r.id AS purchase_id, r.created_at, r.vendor, pi.*
+    SELECT r.id AS purchase_id, r.created_at, r.vendor, pi.item_name, pi.quantity, pi.unit,
+           pi.rate, pi.total, pi.ingredient_id, pi.matched
       FROM recent r JOIN public.purchase_items pi ON pi.purchase_id = r.id
   ), m AS (
     -- the bill's own total does not equal its lines + GST + charges
@@ -251,7 +259,7 @@ BEGIN
     -- a line the app could not tie to a store item
     SELECT l.created_at, 'unmatched', l.purchase_id, coalesce(l.vendor, 'Vendor nahi dala'), l.item_name,
            'Ye line kisi store item se nahi judi — sahi item chuno', l.total
-      FROM lines l WHERE l.ingredient_id IS NULL OR l.matched IS FALSE
+      FROM lines l WHERE l.ingredient_id IS NULL   -- truly tied to no store item (matched=false alone is the scanner's doubt)
     UNION ALL
     -- no vendor on the bill
     SELECT r.created_at, 'no_vendor', r.id, 'Vendor nahi dala', NULL,

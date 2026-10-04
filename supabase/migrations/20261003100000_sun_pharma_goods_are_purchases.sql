@@ -5,16 +5,16 @@
 --   · goods Eicher borrows from Sun Pharma are an Eicher purchase from the
 --     vendor "Sun Pharma", at the transfer rate — so the purchase reports
 --     carry them (until now ₹3.41 lakh in September never reached them);
---   · goods Eicher gives back against that borrowing are a purchase return
---     (a minus line at the price they came in at), so purchases are not
---     counted twice;
+--   · goods Eicher gives back against that borrowing come off that same
+--     purchase (the line shrinks, or goes), so purchases count only what
+--     Eicher kept;
 --   · anything Eicher sends to Sun Pharma — lent, or given back — leaves
 --     Eicher's shelf and lands on Sun Pharma's shelf in the app; anything
 --     Sun Pharma sends comes off Sun Pharma's shelf, as far as it holds it.
 -- Lending Eicher's own goods is not a purchase either way.
 --
 -- purchases.source tells these apart from vendor bills: 'sun_pharma_in',
--- 'sun_pharma_return'. They need no paper bill. The CK-<n> lots now carry
+-- (returns shrink the original). They need no paper bill. The CK-<n> lots now carry
 -- the purchase id, which is what shows "Sun Pharma ka maal" on the shelf.
 --
 -- Sun Pharma's items are matched to Eicher's by name (case and spacing
@@ -84,6 +84,38 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION public.sun_purchase_add(uuid, public.ingredients, numeric, numeric) FROM PUBLIC, anon, authenticated;
+
+-- Giving borrowed goods back takes them off the purchase they came in on:
+-- the line shrinks, a line returned in full goes, and a purchase with no
+-- lines left goes too. Transfers from before 3 Oct have no purchase.
+CREATE OR REPLACE FUNCTION public.sun_purchase_reduce(p_transfer public.central_kitchen_transfers, p_ingredient_id uuid, p_qty numeric)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_item public.purchase_items%ROWTYPE;
+BEGIN
+  IF p_transfer.purchase_id IS NULL OR p_qty <= 0 THEN RETURN; END IF;
+  PERFORM public.allow_stock_move();
+  SELECT * INTO v_item FROM public.purchase_items
+   WHERE purchase_id = p_transfer.purchase_id AND ingredient_id = p_ingredient_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN; END IF;
+  IF v_item.quantity - p_qty <= 0.0005 THEN
+    DELETE FROM public.purchase_items WHERE id = v_item.id;
+  ELSE
+    UPDATE public.purchase_items
+       SET quantity = quantity - p_qty, total = round((quantity - p_qty) * rate, 2)
+     WHERE id = v_item.id;
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.purchase_items WHERE purchase_id = p_transfer.purchase_id) THEN
+    UPDATE public.purchases
+       SET total_amount = (SELECT coalesce(sum(total), 0) FROM public.purchase_items WHERE purchase_id = p_transfer.purchase_id)
+     WHERE id = p_transfer.purchase_id;
+  ELSE
+    UPDATE public.central_kitchen_transfers SET purchase_id = NULL WHERE id = p_transfer.id;
+    UPDATE public.ingredient_batches SET purchase_id = NULL WHERE purchase_id = p_transfer.purchase_id;
+    DELETE FROM public.purchases WHERE id = p_transfer.purchase_id;
+  END IF;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.sun_purchase_reduce(public.central_kitchen_transfers, uuid, numeric) FROM PUBLIC, anon, authenticated;
 
 -- Sun Pharma's shelf for the same item: plus opens a lot at the transfer
 -- rate; minus takes only what Sun Pharma holds there (it is not tracked
@@ -313,8 +345,6 @@ BEGIN
     RAISE EXCEPTION 'Only the authorised Store Keeper can return Central Kitchen stock';
   END IF;
 
-  v_purchase := public.sun_purchase_open(v_transfer.canteen_id, v_transfer, 'sun_pharma_return');
-
   FOR v_input IN
     SELECT value FROM jsonb_array_elements(p_items) ORDER BY (value->>'item_id')::uuid
   LOOP
@@ -338,9 +368,9 @@ BEGIN
     v_cost := public.consume_named_lot_then_fifo(
       v_line.ingredient_id, v_transfer.canteen_id, v_qty, 'CK-' || v_transfer.transfer_no::text);
 
-    -- Back at the price it came in at: the purchase it reverses.
+    -- Off the purchase it came in on, and onto Sun Pharma's shelf.
     SELECT * INTO v_ing FROM public.ingredients WHERE id = v_line.ingredient_id;
-    PERFORM public.sun_purchase_add(v_purchase, v_ing, -v_qty, v_line.rate);
+    PERFORM public.sun_purchase_reduce(v_transfer, v_line.ingredient_id, v_qty);
     PERFORM public.sun_site_move(v_ing, v_qty, v_line.rate, format('Eicher ne udhaar lautaya — transfer #%s', v_transfer.transfer_no));
 
     UPDATE public.central_kitchen_transfer_items
