@@ -11,7 +11,7 @@ interface ProtectedRouteProps {
 // Note: this is a UX guard only. The database enforces the same limits through
 // RLS, so a user who edits their way past this screen still gets nothing back.
 export default function ProtectedRoute({ children, minRole }: ProtectedRouteProps) {
-  const { session, loading, rank, roleData } = useAuth();
+  const { session, loading, rank, roleData, roleError, retryRole } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -24,6 +24,19 @@ export default function ProtectedRoute({ children, minRole }: ProtectedRouteProp
 
   if (!session) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Never fall back to a lower role because the network blinked.
+  if (roleError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-6">
+        <div className="max-w-sm text-center space-y-3">
+          <h2 className="text-lg font-semibold">Aapka role load nahi hua</h2>
+          <p className="text-sm text-muted-foreground">Internet slow lag raha hai. Dobara try karein — aapka data safe hai.</p>
+          <button type="button" onClick={retryRole} className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground">Dobara try karo</button>
+        </div>
+      </div>
+    );
   }
 
   // The role list is what decides — a chef outranks a store keeper on the
