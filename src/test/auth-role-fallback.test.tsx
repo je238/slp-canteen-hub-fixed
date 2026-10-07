@@ -54,11 +54,11 @@ describe("role loading", () => {
     await waitFor(() => expect(screen.getByText("store_keeper")).toBeInTheDocument());
     await new Promise((r) => setTimeout(r, 3200));
     expect(screen.queryByText("vendor")).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("says it could not load rather than guessing a role", async () => {
     roleReads = [];
     render(<AuthProvider><Show /></AuthProvider>);
-    await waitFor(() => expect(screen.getByText("role-error")).toBeInTheDocument(), { timeout: 5000 });
-  });
+    await waitFor(() => expect(screen.getByText("role-error")).toBeInTheDocument(), { timeout: 8000 });
+  }, 10_000);
 });

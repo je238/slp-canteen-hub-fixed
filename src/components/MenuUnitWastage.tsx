@@ -6,6 +6,7 @@ import { toCompressedBase64 } from "@/lib/image";
 import { Input } from "@/components/ui/input";
 import FilePickButton from "@/components/FilePickButton";
 import { useAuth } from "@/contexts/AuthContext";
+import { useCanteens } from "@/hooks/useSupabaseData";
 
 const UNIT_NUMBERS = [1, 2, 3] as const;
 
@@ -16,6 +17,9 @@ export default function MenuUnitWastage({
   const [reasons, setReasons] = useState<Record<number, string>>({});
   const [busyUnit, setBusyUnit] = useState<number | null>(null);
   const { isManagerOrAbove, isOwner } = useAuth();
+  // At a site with no Head Supervisor the manager records wastage too.
+  const { data: canteens } = useCanteens();
+  const managerDoesHs = isManagerOrAbove && !!((canteens || []) as any[]).find((c) => c.id === canteenId)?.manager_does_hs;
   const entries: any[] = item.menu_unit_wastage || [];
 
   const save = async (unitNo: number, file: File) => {
@@ -121,7 +125,7 @@ export default function MenuUnitWastage({
           );
         }
 
-        if (isManagerOrAbove && !isOwner) {
+        if (isManagerOrAbove && !isOwner && !managerDoesHs) {
           return (
             <div key={unitNo} className="rounded-md border bg-card p-2 text-xs text-muted-foreground">
               <b className="text-foreground">Unit {unitNo}</b> · HS wastage entry pending

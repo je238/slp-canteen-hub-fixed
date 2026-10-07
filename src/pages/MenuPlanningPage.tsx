@@ -32,7 +32,6 @@ export default function MenuPlanningPage() {
   const { selectedCanteen, setSelectedCanteen } = useAppContext();
   const { isManagerOrAbove, isHeadSupervisor, isChef, isOwner } = useAuth();
   const canEnterMenuData = isHeadSupervisor || isManagerOrAbove;
-  const canDoInitialDataEntry = isHeadSupervisor || isOwner;
   const [params] = useSearchParams();
   // Arriving from the "menu published" notification, which names the day and
   // the unit it was published for. Without this the chef landed on today, on
@@ -58,6 +57,10 @@ export default function MenuPlanningPage() {
   const { data: canteens } = useCanteens();
   const site = (canteens || []).find((c: any) => c.id === selectedCanteen) as any;
   const countUnits = countUnitsFor(site, date);
+  // Who may make a first entry (plates, punch): the Head Supervisor, the
+  // owner, and — at a site with no HS, like Sun Pharma — the manager.
+  const managerDoesHs = isManagerOrAbove && !!site?.manager_does_hs;
+  const canDoInitialDataEntry = isHeadSupervisor || isOwner || managerDoesHs;
   const { data: uncounted } = useUncountedMeals(selectedCanteen, 7);
   const { data: due } = useDueToPublish(selectedCanteen);
   const qc = useQueryClient();
@@ -431,9 +434,7 @@ export default function MenuPlanningPage() {
                             placeholder={`Expected ${plan.expected_headcount}`}
                             defaultValue={plan.actual_headcount ?? ""}
                             key={`actual-${plan.id}-${plan.actual_headcount ?? ""}`}
-                            readOnly={isManagerOrAbove && !isOwner
-                              ? plan.actual_headcount == null
-                              : plan.actual_headcount != null && !isManagerOrAbove}
+                            readOnly={plan.actual_headcount == null ? !canDoInitialDataEntry : !isManagerOrAbove}
                             id={`actual-${plan.id}`}
                           /></div>
                           <div><Label className="text-[10px]">Eicher punch (Final)</Label>
@@ -441,9 +442,7 @@ export default function MenuPlanningPage() {
                             placeholder="Official punching count"
                             defaultValue={plan.company_punch_count ?? ""}
                             key={`punch-${plan.id}-${plan.company_punch_count ?? ""}`}
-                            readOnly={isManagerOrAbove && !isOwner
-                              ? plan.company_punch_count == null
-                              : plan.company_punch_count != null && !isManagerOrAbove}
+                            readOnly={plan.company_punch_count == null ? !canDoInitialDataEntry : !isManagerOrAbove}
                             id={`punch-${plan.id}`}
                           /></div>
                         </div>
