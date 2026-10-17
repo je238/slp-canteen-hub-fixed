@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
 import { toast } from "sonner";
 import UnitSwitcher from "@/components/UnitSwitcher";
+import { usePageViewLog } from "@/hooks/usePageViewLog";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -18,8 +19,9 @@ interface AppLayoutProps {
 export default function AppLayout({ children, title }: AppLayoutProps) {
   const navigate = useNavigate();
   const { selectedCanteen } = useAppContext();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
   const { data: canteens } = useCanteens();
+  usePageViewLog(user?.id, title, selectedCanteen === "all" ? null : selectedCanteen);
   const canteenName = selectedCanteen === "all"
     ? "Combined view · unit-wise data"
     : canteens?.find((c: any) => c.id === selectedCanteen)?.name || "";

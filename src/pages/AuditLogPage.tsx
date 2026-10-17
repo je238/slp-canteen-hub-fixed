@@ -11,6 +11,7 @@ import { useAppContext } from "@/contexts/AppContext";
 import { useCanteens, useUserDirectory } from "@/hooks/useSupabaseData";
 import { supabase } from "@/integrations/supabase/client";
 import { clampToCutover, REPORTING_CUTOVER_DATE } from "@/lib/cutover";
+import PageViewsLog from "@/components/PageViewsLog";
 
 function isoDaysAgo(days: number) {
   const d = new Date();
@@ -60,6 +61,7 @@ export default function AuditLogPage() {
   const { selectedCanteen } = useAppContext();
   const [from, setFrom] = useState(clampToCutover(isoDaysAgo(30)));
   const [search, setSearch] = useState("");
+  const [view, setView] = useState<"changes" | "seen">("changes");
   const PAGE = 500;
   const [limit, setLimit] = useState(PAGE);
   const { data: users = {} } = useUserDirectory();
@@ -93,7 +95,13 @@ export default function AuditLogPage() {
     <div className="space-y-4 animate-fade-in">
       <Card className="border-none shadow-sm">
         <CardContent className="p-4 space-y-3">
-          <div><p className="font-semibold">Kisne, kya, kab aur kyun badla</p><p className="text-xs text-muted-foreground">Chef, Manager, Store Keeper aur Admin ke audited changes. Record edit/delete nahi hota.</p></div>
+          <div className="flex gap-2">
+            <Button size="sm" variant={view === "changes" ? "default" : "outline"} onClick={() => setView("changes")}>Kisne kya badla</Button>
+            <Button size="sm" variant={view === "seen" ? "default" : "outline"} onClick={() => setView("seen")}>Kisne kya dekha</Button>
+          </div>
+          {view === "changes"
+            ? <div><p className="font-semibold">Kisne, kya, kab aur kyun badla</p><p className="text-xs text-muted-foreground">Chef, Manager, Store Keeper aur Admin ke audited changes. Record edit/delete nahi hota.</p></div>
+            : <div><p className="font-semibold">Kisne kaunsi screen kholi, kitni baar aur kitni der</p><p className="text-xs text-muted-foreground">Reports, Meal Profit, Stock Verification jaisi screens dekhne ka record. Kisi naam par tap karke saari screens aur din dekho.</p></div>}
           <div className="grid sm:grid-cols-[180px_1fr] gap-2">
             <Input type="date" min={REPORTING_CUTOVER_DATE} value={from} onChange={(e) => setFrom(clampToCutover(e.target.value))} />
             <div className="relative"><Search className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" /><Input className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Reason, item, user ya action search karein" /></div>
@@ -101,6 +109,7 @@ export default function AuditLogPage() {
         </CardContent>
       </Card>
 
+      {view === "seen" ? <PageViewsLog from={from} canteenId={selectedCanteen} search={search} /> : <>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <Card className="border-none shadow-sm"><CardContent className="p-4"><p className="text-xs text-muted-foreground">Changes shown</p><p className="text-xl font-bold">{filtered.length}</p>{logs.length >= limit && <p className="text-[10px] text-muted-foreground">Sirf latest {limit} — neeche se aur load karein</p>}</CardContent></Card>
         <Card className="border-none shadow-sm"><CardContent className="p-4"><p className="text-xs text-muted-foreground">From</p><p className="text-base font-bold">{new Date(`${from}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</p></CardContent></Card>
@@ -128,6 +137,7 @@ export default function AuditLogPage() {
           </CardContent></Card>)}
           {logs.length >= limit && <div className="text-center pt-1"><Button variant="outline" size="sm" onClick={() => setLimit((n) => n + PAGE)}>Aur purane {PAGE} dikhao</Button></div>}
         </div>}
+      </>}
     </div>
   </AppLayout>;
 }
