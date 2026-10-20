@@ -51,22 +51,22 @@ export default function InventoryPage() {
   const renameIngredient = useRenameIngredient();
   const removeItem = useDeleteIngredient();
 
-  // Admins have full removal control. Traded items are archived instead of
-  // physically erased so old bills, issues and consumption remain correct.
-  // Store keepers retain the narrower accidental-unused-item action.
+  // Admin and store keeper both have full removal control (owner's call,
+  // 20/10/2026). Traded items are archived instead of physically erased so
+  // old bills, issues and consumption remain correct; a store keeper's
+  // removal is reported to the manager, admin and owner.
   const doDelete = async (item: any) => {
-    const message = isAdmin
-      ? `"${item.name}" ko inventory se remove karein?\n\nBacha stock write-off hoga. Purani purchase, issue aur consumption history safe rahegi.`
-      : `"${item.name}" ko item list se delete karein?\n\nStore Keeper sirf galti se bana, bilkul unused item delete kar sakta hai.`;
+    const stock = Number(item.current_stock) || 0;
+    const message = `"${item.name}" ko inventory se remove karein?\n\n`
+      + (stock ? `Bacha stock ${stock} ${item.unit || ""} write-off hoga (0 ho jayega). ` : "")
+      + "Purani purchase, issue aur consumption history safe rahegi."
+      + (isAdmin ? "" : "\n\nManager, Admin aur Owner ko iski khabar jayegi.");
     if (!window.confirm(message)) return;
 
-    let deleteReason = "";
-    if (isAdmin) {
-      deleteReason = window.prompt("Item remove karne ka reason likhein (zaroori):", "")?.trim() || "";
-      if (!deleteReason) {
-        toast.error("Reason ke bina item remove nahi hoga");
-        return;
-      }
+    const deleteReason = window.prompt("Item remove karne ka reason likhein (zaroori):", "")?.trim() || "";
+    if (!deleteReason) {
+      toast.error("Reason ke bina item remove nahi hoga");
+      return;
     }
     try {
       const r = await removeItem.mutateAsync({ id: item.id, reason: deleteReason });
@@ -256,6 +256,11 @@ export default function InventoryPage() {
                 sampark karein. Purchase receive, approved issue aur return ka
                 normal kaam pehle jaisa chalega.
               </p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Koi bhi item (stock ya history wala bhi) aap 🗑 se hata sakte ho — reason
+                likhna zaroori hai. Bacha stock 0 hoga, purani history safe rahegi, aur
+                Manager / Admin / Owner ko khabar jayegi.
+              </p>
             </CardContent>
           </Card>
         )}
@@ -399,11 +404,7 @@ export default function InventoryPage() {
                             <button
                               onClick={() => doDelete(item)}
                               disabled={removeItem.isPending}
-                              title={isAdmin
-                                ? "Inventory se remove karein — history safe rahegi"
-                                : Number(item.current_stock) !== 0
-                                  ? "Stock baaki hai — Store Keeper delete nahi kar sakta"
-                                  : "Unused item delete karein"}
+                              title="Inventory se remove karein — history safe rahegi"
                               aria-label={`${item.name} delete karein`}
                               className="p-1 rounded hover:bg-destructive/10 disabled:opacity-40"
                             >
