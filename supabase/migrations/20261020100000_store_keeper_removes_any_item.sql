@@ -7,8 +7,8 @@
 --
 -- Nothing is erased that has a past. An item with stock or history is
 -- archived, not deleted: its bills, issues, counts and consumption stay as
--- they were, remaining stock is written off through adjust_stock (ledger row
--- + its own alert), and the action is logged with the store keeper's reason.
+-- they were, remaining stock is written off (shelf, lots and a ledger row
+-- + alert), and the action is logged with the store keeper's reason.
 -- A reason is required from anyone removing such an item. The manager,
 -- admin and owner get a notification for every item the store keeper
 -- removes. A truly unused row is still deleted outright, as before.
@@ -85,7 +85,21 @@ BEGIN
 
   -- Full admin removal: write remaining goods out through the existing
   -- audited stock function, then hide the master row from all active pickers.
-  IF v_old_stock <> 0 THEN
+  -- adjust_stock is admin-only since 03/09 (manual edits stay closed to the
+  -- store keeper), so a store keeper's removal writes the stock off here, the
+  -- same three steps adjust_stock takes: shelf, lots, ledger.
+  IF v_old_stock <> 0 AND NOT v_is_admin THEN
+    PERFORM public.allow_stock_move();
+    UPDATE public.ingredients SET current_stock = 0 WHERE id = p_ingredient_id;
+    PERFORM public.reconcile_lots(p_ingredient_id);
+    INSERT INTO public.stock_ledger
+      (ingredient_id, canteen_id, change_qty, balance_after, reason, reference_type,
+       created_by, service_date, value)
+    VALUES (p_ingredient_id, v_ing.canteen_id, -v_old_stock, 0,
+            'Inventory item removed by store keeper: ' || v_reason, 'manual', auth.uid(),
+            (now() AT TIME ZONE 'Asia/Kolkata')::date,
+            round(abs(v_old_stock) * coalesce(v_ing.cost_per_unit, 0), 2));
+  ELSIF v_old_stock <> 0 THEN
     PERFORM public.adjust_stock(
       p_ingredient_id,
       0,
@@ -113,8 +127,7 @@ BEGIN
        'history_preserved', true));
 
   -- The owner and the manager hear about every item the store keeper takes
-  -- off the shelf. A write-off of remaining stock also raises adjust_stock's
-  -- own alert; this one is for the item itself.
+  -- off the shelf, with the stock written off and its value.
   IF NOT v_is_admin THEN
     INSERT INTO public.notifications (canteen_id, target_role, title, body, link, ref_type, ref_id)
     VALUES (v_ing.canteen_id, 'manager',
