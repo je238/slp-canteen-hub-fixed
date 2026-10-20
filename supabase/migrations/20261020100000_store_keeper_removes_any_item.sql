@@ -67,6 +67,7 @@ BEGIN
 
   -- A truly unused row has nothing to preserve, so remove it completely.
   IF NOT v_has_history AND v_old_stock = 0 THEN
+    PERFORM public.allow_stock_move();
     DELETE FROM public.ingredient_batches WHERE ingredient_id = p_ingredient_id;
     DELETE FROM public.ingredients WHERE id = p_ingredient_id;
 
@@ -107,6 +108,10 @@ BEGIN
     );
   END IF;
 
+  -- Archiving zeroes the reorder levels, which guard_ingredient_edit reads
+  -- as an item-detail edit and refuses for anyone but an admin. The removal
+  -- itself is the permission; say so to the guard.
+  PERFORM public.allow_stock_move();
   UPDATE public.ingredients
   SET archived_at = now(),
       archived_by = auth.uid(),
