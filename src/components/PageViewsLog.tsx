@@ -43,10 +43,10 @@ export default function PageViewsLog({ from, canteenId, search }: { from: string
 
   if (error) return <Card><CardContent className="p-8 text-center text-sm text-destructive">Ye record sirf Admin aur upar wale dekh sakte hain.</CardContent></Card>;
   if (isLoading) return <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Load ho raha hai…</CardContent></Card>;
-  if (!people.length) return <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Is date se kisi ne koi screen nahi kholi. (Ye record 17 Oct 2026 se shuru hua hai.)</CardContent></Card>;
+  if (!people.length) return <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Is date se kisi ne koi screen nahi kholi. (Ye record 20 Oct 2026 se shuru hua hai.)</CardContent></Card>;
 
   return <div className="space-y-2">
-    <p className="text-xs text-muted-foreground px-1">Ye record 17 Oct 2026 se hai. Samay = jitni der screen saamne khuli rahi (phone band ya app peeche ho to nahi gina).</p>
+    <p className="text-xs text-muted-foreground px-1">Ye record 20 Oct 2026 se hai. Samay = jitni der screen saamne khuli rahi (phone band ya app peeche ho to nahi gina).</p>
     {people.map((p) => {
       const isOpen = open === p.userId;
       return <Card key={p.userId} className="border-none shadow-sm"><CardContent className="p-4 space-y-3">
