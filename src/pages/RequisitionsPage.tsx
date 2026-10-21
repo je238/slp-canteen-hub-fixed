@@ -1982,7 +1982,11 @@ export default function RequisitionsPage() {
 
       {/* ---- Head Chef verification, then Manager full edit ---- */}
       <Dialog open={!!review} onOpenChange={(o) => { if (!o) setReview(null); }}>
-        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+        {/* Full screen on a phone: 90vh is taller than what an iPhone shows,
+            so the window was cut off mid-list with the page showing below.
+            The Approve bar sticks to the bottom so a 30-line order never
+            hides it. */}
+        <DialogContent className="h-[calc(100dvh-0.75rem)] max-h-[calc(100dvh-0.75rem)] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] overflow-y-auto p-4 sm:h-auto sm:max-h-[90vh] sm:max-w-4xl sm:p-6">
           <DialogHeader><DialogTitle>{isHeadChef ? "Head Chef full review" : "Manager review"} · REQ-{review?.req_no}</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground">
             {isHeadChef
@@ -2156,7 +2160,7 @@ export default function RequisitionsPage() {
           <p className="text-xs text-muted-foreground">
             Item ya quantity badli hai to upar reason likhein; bina reason ke changed order save nahi hoga.
           </p>
-          <DialogFooter className="items-center sm:justify-between gap-3">
+          <DialogFooter className="sticky bottom-0 z-10 -mx-4 -mb-4 items-center gap-3 border-t bg-background p-4 sm:-mx-6 sm:-mb-6 sm:justify-between sm:px-6">
             {!isHeadChef ? (
               <Button variant="destructive" onClick={() => review && cancelWholeOrder(review)} disabled={cancelReq.isPending}>
                 <Trash2 className="mr-1.5 h-4 w-4" /> Pura order cancel
