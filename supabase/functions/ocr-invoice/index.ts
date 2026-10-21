@@ -303,19 +303,32 @@ serve(async (req) => {
       modelCache = null;                       // re-ask Google every morning
       const models = await pickModels(key);
       const started = Date.now();
-      let error = "";
-      try {
-        const r = await fetchWithTimeout(
-          `https://generativelanguage.googleapis.com/v1beta/models/${models[0].name}:generateContent`,
-          { method: "POST", headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with the single word OK." }] }] }) },
-          25_000);
-        if (!r.ok) error = `${models[0].name} -> ${r.status}: ${(await r.text()).slice(0, 200)}`;
-      } catch (e) {
-        error = `${models[0].name} ${e instanceof DOMException && e.name === "AbortError" ? "timed out after 25000ms" : String(e)}`;
+      // Tried the way a real scan is: each model twice, Flash then Lite.
+      // Checking only the first model once raised "scanner down" most
+      // mornings in Oct 2026 while scans worked through the retry/fallback.
+      const errors: string[] = [];
+      let answeredBy = "";
+      for (const m of models) {
+        for (let attempt = 0; attempt < 2 && !answeredBy; attempt++) {
+          if (attempt) await new Promise((r) => setTimeout(r, retryDelay(attempt)));
+          try {
+            const r = await fetchWithTimeout(
+              `https://generativelanguage.googleapis.com/v1beta/models/${m.name}:generateContent`,
+              { method: "POST", headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+                body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with the single word OK." }] }] }) },
+              25_000);
+            if (r.ok) answeredBy = m.name;
+            else errors.push(`${m.name} -> ${r.status}: ${(await r.text()).slice(0, 200)}`);
+          } catch (e) {
+            errors.push(`${m.name} ${e instanceof DOMException && e.name === "AbortError" ? "timed out after 25000ms" : String(e)}`);
+          }
+        }
+        if (answeredBy) break;
       }
-      if (error) await alertScannerDown(null, error, /-> 429/.test(error));
-      return new Response(JSON.stringify({ ok: !error, models: models.map((m) => m.name), ms: Date.now() - started, error: error || null }),
+      const error = answeredBy ? "" : errors[errors.length - 1] || "no model answered";
+      if (error) await alertScannerDown(null, error, errors.some((x) => /-> 429/.test(x)));
+      return new Response(JSON.stringify({ ok: !error, models: models.map((m) => m.name), answeredBy: answeredBy || null,
+        failedTries: errors.length, ms: Date.now() - started, error: error || null }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
