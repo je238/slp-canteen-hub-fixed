@@ -393,9 +393,8 @@ export default function RequisitionsPage() {
       init[l.id] = String(isHeadChef
         ? (l.head_chef_qty ?? l.requested_qty)
         : (l.approved_qty ?? l.head_chef_qty ?? l.requested_qty));
-      initIngredients[l.id] = isHeadChef
-        ? l.ingredient_id
-        : (l.head_chef_ingredient_id || l.ingredient_id);
+      // Head Chef re-editing a forwarded order starts from their own choice.
+      initIngredients[l.id] = l.head_chef_ingredient_id || l.ingredient_id;
     }
     setApproved(init);
     setReviewIngredient(initIngredients);
@@ -1217,7 +1216,15 @@ export default function RequisitionsPage() {
                       <Button size="sm" onClick={() => openReview(r)}>
                         <ClipboardList className="mr-1.5 h-4 w-4" /> Full review
                       </Button>
-                    ) : <span className="text-xs text-muted-foreground">Manager approval pending</span>
+                    ) : (
+                      // Forwarded, but the Manager has not acted yet: still open to correct.
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <span className="text-xs text-muted-foreground">Manager approval pending</span>
+                        <Button size="sm" variant="outline" onClick={() => openReview(r)}>
+                          <ClipboardList className="mr-1.5 h-4 w-4" /> Dobara edit karo
+                        </Button>
+                      </div>
+                    )
                   ) : isManagerOrAbove ? (
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button size="sm" variant="outline" className="text-destructive"
