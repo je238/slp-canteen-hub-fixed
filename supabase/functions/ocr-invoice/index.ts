@@ -436,11 +436,14 @@ serve(async (req) => {
     // Flash reads handwriting; Lite mostly cannot. When Flash hiccups (an
     // empty answer, a 503) it gets a second go before Lite is tried — going
     // straight to Lite turned one bad second at Google into a failed scan.
-    // 45 + 40 + 20 s stays inside the app's 120 s wait.
+    // 70 + 40 s stays inside the app's 120 s wait. On 1 Nov 2026 Flash took
+    // over 45 s on a clean printed bill, so 45 + 40 + 20 s timed out on all
+    // three tries; one long Flash try beats two short ones, and Lite needs
+    // ~30 s on a real photo, not 20.
     const found = await pickModels(geminiKey);
     const models: Model[] = found.length > 1
-      ? [{ ...found[0], timeoutMs: 45_000 }, { ...found[0], timeoutMs: 40_000 }, { ...found[1], timeoutMs: 20_000 }]
-      : [{ ...found[0], timeoutMs: 55_000 }, { ...found[0], timeoutMs: 50_000 }];
+      ? [{ ...found[0], timeoutMs: 70_000 }, { ...found[1], timeoutMs: 40_000 }]
+      : [{ ...found[0], timeoutMs: 60_000 }, { ...found[0], timeoutMs: 50_000 }];
     const retired = new Set<string>();
     for (let attempt = 0; attempt < models.length; attempt += 1) {
       const model = models[attempt];
