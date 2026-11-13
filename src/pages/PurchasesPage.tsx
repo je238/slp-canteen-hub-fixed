@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   usePurchases, useSuppliers, useAddSupplier, useConfirmPurchase, useIngredients,
   useReceiveStockWithoutBill, useNoBillRatePreview, useFinalizePurchaseInvoice, useCorrectPurchaseLine, useAddIngredient,
-  useRequestPurchaseChange, usePendingPurchaseChanges, useReviewPurchaseChange,
+  useRequestPurchaseChange, usePendingPurchaseChanges, useReviewPurchaseChange, useRequestVendorChange,
 } from "@/hooks/useSupabaseData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -100,7 +100,9 @@ function PurchaseLineDetails({ purchase, onCorrect }: { purchase: any; onCorrect
 }
 
 const inr = (n: unknown) => Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
-const changeSummary = (v: any) => v ? `${v.item_name} · ${inr(v.quantity)} ${v.unit} × ₹${inr(v.rate)} = ₹${inr(v.total)}` : "";
+const changeSummary = (v: any) => !v ? ""
+  : v.supplier_name !== undefined ? `Vendor: ${v.supplier_name}`
+  : `${v.item_name} · ${inr(v.quantity)} ${v.unit} × ₹${inr(v.rate)} = ₹${inr(v.total)}`;
 
 // Admin / Super Admin: every bill change the store keeper has filed, old
 // beside new, with the reason. Nothing has moved until Approve.
@@ -152,6 +154,66 @@ function PurchaseChangeApprovals({ canteenId }: { canteenId: string }) {
         ))}
       </CardContent>
     </Card>
+  );
+}
+
+// The vendor on a bill, old or new, changes only after Admin approval.
+function VendorChangeDialog({ purchase, suppliers, onClose }: {
+  purchase: any | null;
+  suppliers: any[];
+  onClose: () => void;
+}) {
+  const requestVendor = useRequestVendorChange();
+  const [supplierId, setSupplierId] = useState("");
+  const [reason, setReason] = useState("");
+  const open = !!purchase;
+  const options = [...suppliers].filter((s) => s.id !== purchase?.supplier_id).sort((a, b) => a.name.localeCompare(b.name));
+
+  const save = async () => {
+    if (!supplierId) { toast.error("Sahi vendor chuno"); return; }
+    if (!reason.trim()) { toast.error("Vendor badalne ka reason likhna zaroori hai"); return; }
+    try {
+      await requestVendor.mutateAsync({ purchase_id: purchase.id, supplier_id: supplierId, reason: reason.trim() });
+      toast.success("Admin approval ke liye bhej diya. Approve hone tak vendor pehle jaisa rahega.");
+      onClose();
+    } catch (error: any) {
+      toast.error(error.message || "Request nahi gayi");
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next && !requestVendor.isPending) onClose(); }}>
+      <DialogContent className="sm:max-w-md" onOpenAutoFocus={() => { setSupplierId(""); setReason(""); }}>
+        <DialogHeader><DialogTitle>Bill ka vendor badlo</DialogTitle></DialogHeader>
+        {purchase && (
+          <div className="space-y-3">
+            <div className="rounded-lg border bg-muted/50 p-3 text-sm">
+              <p className="text-xs text-muted-foreground">Abhi vendor · bill {fmtDate(purchase.created_at)} · ₹{inr(purchase.stated_total ?? purchase.total_amount)}</p>
+              <p className="font-semibold">{purchase.suppliers?.name || "Koi vendor nahi"}</p>
+            </div>
+            <div>
+              <Label>Sahi vendor</Label>
+              <Select value={supplierId} onValueChange={setSupplierId}>
+                <SelectTrigger><SelectValue placeholder="Vendor chuno" /></SelectTrigger>
+                <SelectContent>
+                  {options.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-[11px] text-muted-foreground">List mein nahi hai? Pehle "Add Supplier" se jodo.</p>
+            </div>
+            <div><Label>Kyu badal rahe ho? (zaroori)</Label>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="jaise galti se dusra vendor chuna tha" /></div>
+            <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-950">
+              Ye change Admin ke paas approval ke liye jayega. Approve hone tak bill ka vendor nahi badlega.
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={onClose} disabled={requestVendor.isPending}>Cancel</Button>
+              <Button onClick={save} disabled={requestVendor.isPending}>{requestVendor.isPending ? "Bhej raha hai…" : "Admin approval ke liye bhejo"}</Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -596,6 +658,9 @@ export default function PurchasesPage() {
   const [confirmedView, setConfirmedView] = useState<"date" | "vendor">("date");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [billPurchase, setBillPurchase] = useState<any | null>(null);
+  const [vendorTarget, setVendorTarget] = useState<any | null>(null);
+  const vendorChangePending = (p: any) => (p.purchase_change_requests || [])
+    .find((r: any) => r.kind === "vendor" && r.status === "pending");
   // The store keeper's bill desk links here with ?bill=<purchase id>: open
   // that purchase's bill screen straight away.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -884,6 +949,11 @@ export default function PurchasesPage() {
                         : billPending
                         ? <span className="rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-semibold">BILL PENDING</span>
                         : <span className="rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10px] font-semibold">{Math.max(1, billFiles.length)} BILL</span>}
+                      {vendorChangePending(p) && (
+                        <span className="rounded-full bg-blue-100 text-blue-800 px-2 py-0.5 text-[10px] font-semibold">
+                          VENDOR → {vendorChangePending(p).new_values?.supplier_name} · APPROVAL BAAKI
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">Confirmed {p.approved_at ? fmtDate(p.approved_at) : ""}</p>
                     </div>
@@ -892,6 +962,11 @@ export default function PurchasesPage() {
                       {canManagePurchases && !fromSun && (billPending || !p.bill_finalized_at || billFiles.length < 4) && (
                         <Button size="sm" variant={billPending ? "default" : "outline"} className="w-full justify-center gap-1 text-xs sm:w-auto" onClick={() => setBillPurchase(p)}>
                           <Paperclip className="h-3.5 w-3.5" /> {billPending && billFiles.length === 0 && !p.invoice_image_url ? "Bill aaya — upload" : !p.bill_finalized_at ? "Bill rates/GST final karo" : "Aur bill lagao"}
+                        </Button>
+                      )}
+                      {canManagePurchases && !fromSun && !vendorChangePending(p) && (
+                        <Button size="sm" variant="outline" className="w-full justify-center gap-1 text-xs sm:w-auto" onClick={() => setVendorTarget(p)}>
+                          <Building2 className="h-3.5 w-3.5" /> Vendor badlo
                         </Button>
                       )}
                     </div>
@@ -935,6 +1010,9 @@ export default function PurchasesPage() {
         </Tabs>
       </div>
       {canManagePurchases && <LateBillsDialog purchase={billPurchase} onClose={() => setBillPurchase(null)} />}
+      {canManagePurchases && (
+        <VendorChangeDialog purchase={vendorTarget} suppliers={(suppliers || []) as any[]} onClose={() => setVendorTarget(null)} />
+      )}
       {canManagePurchases && (
         <PurchaseCorrectionDialog
           purchase={correctionTarget?.purchase || null}

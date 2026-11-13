@@ -393,6 +393,25 @@ export function useRequestPurchaseChange() {
   });
 }
 
+export function useRequestVendorChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { purchase_id: string; supplier_id: string; reason: string }) => {
+      const { data, error } = await supabase.rpc("request_purchase_vendor_change" as any, {
+        p_purchase_id: input.purchase_id,
+        p_supplier_id: input.supplier_id,
+        p_reason: input.reason,
+      });
+      if (error) throw error;
+      return data as any;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["pendingPurchaseChanges"] });
+    },
+  });
+}
+
 export function usePendingPurchaseChanges(canteenId?: string, enabled = true) {
   return useQuery({
     queryKey: ["pendingPurchaseChanges", canteenId],
