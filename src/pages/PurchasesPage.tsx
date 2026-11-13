@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
   usePurchases, useSuppliers, useAddSupplier, useConfirmPurchase, useIngredients,
   useReceiveStockWithoutBill, useNoBillRatePreview, useFinalizePurchaseInvoice, useCorrectPurchaseLine, useAddIngredient,
+  useRequestPurchaseChange, usePendingPurchaseChanges, useReviewPurchaseChange,
 } from "@/hooks/useSupabaseData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,15 @@ function InvoiceImageButton({ path, label = "Invoice" }: { path?: string | null;
 function PurchaseLineDetails({ purchase, onCorrect }: { purchase: any; onCorrect?: (line: any) => void }) {
   const lines: any[] = purchase.purchase_items || [];
   const corrections: any[] = purchase.purchase_line_corrections || [];
+  const requests: any[] = purchase.purchase_change_requests || [];
+  const pendingFor = (lineId: string) => requests.find((r) => r.purchase_item_id === lineId && r.status === "pending");
+  // The latest answered request, shown only when it was a "no".
+  const lastRejected = (lineId: string) => {
+    const latest = requests
+      .filter((r) => r.purchase_item_id === lineId && r.status !== "pending")
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+    return latest?.status === "rejected" ? latest : null;
+  };
   return (
     <div className="mt-3 border-t pt-3">
       <p className="text-xs font-semibold mb-2">Invoice mein add kiya saman ({lines.length})</p>
@@ -61,10 +71,20 @@ function PurchaseLineDetails({ purchase, onCorrect }: { purchase: any; onCorrect
                 {corrections.some((row) => row.purchase_item_id === line.id) && (
                   <p className="mt-1 text-[10px] font-semibold text-amber-700">Sudhari hui entry · purani entry audit me safe hai</p>
                 )}
+                {pendingFor(line.id) && (
+                  <p className="mt-1 text-[10px] font-semibold text-blue-700">
+                    Admin approval baaki: {changeSummary(pendingFor(line.id).new_values)} · "{pendingFor(line.id).reason}"
+                  </p>
+                )}
+                {!pendingFor(line.id) && lastRejected(line.id) && (
+                  <p className="mt-1 text-[10px] font-semibold text-red-700">
+                    Change mana hua{lastRejected(line.id).review_note ? `: ${lastRejected(line.id).review_note}` : ""} · bill pehle jaisa hai
+                  </p>
+                )}
               </div>
               <div className="flex items-center justify-between gap-1.5 sm:justify-end">
                 <p className="font-semibold whitespace-nowrap">₹{Number(line.total || 0).toLocaleString("en-IN")}</p>
-                {onCorrect && (
+                {onCorrect && !pendingFor(line.id) && (
                   <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-[10px]" onClick={() => onCorrect(line)}>
                     <Pencil className="h-3 w-3" /> Galat entry sudharo
                   </Button>
@@ -79,15 +99,75 @@ function PurchaseLineDetails({ purchase, onCorrect }: { purchase: any; onCorrect
   );
 }
 
+const inr = (n: unknown) => Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const changeSummary = (v: any) => v ? `${v.item_name} · ${inr(v.quantity)} ${v.unit} × ₹${inr(v.rate)} = ₹${inr(v.total)}` : "";
+
+// Admin / Super Admin: every bill change the store keeper has filed, old
+// beside new, with the reason. Nothing has moved until Approve.
+function PurchaseChangeApprovals({ canteenId }: { canteenId: string }) {
+  const { data: requests } = usePendingPurchaseChanges(canteenId);
+  const review = useReviewPurchaseChange();
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  if (!requests?.length) return null;
+
+  const answer = async (request: any, approve: boolean) => {
+    const note = (notes[request.id] || "").trim();
+    if (!approve && !note) { toast.error("Mana karne ki wajah likho — store keeper ko dikhegi"); return; }
+    try {
+      await review.mutateAsync({ request_id: request.id, approve, note });
+      toast.success(approve ? "Change approve hua — bill, stock aur rate sudhar gaye" : "Change mana kiya — bill pehle jaisa hai");
+    } catch (error: any) {
+      toast.error(error.message || "Faisla save nahi hua");
+    }
+  };
+
+  return (
+    <Card id="purchase-changes" className="border-blue-300 bg-blue-50/60">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Bill change — approval chahiye ({requests.length})</CardTitle>
+        <p className="text-xs text-muted-foreground">Approve karne tak bill, stock aur rate kuch nahi badla hai.</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {requests.map((request) => (
+          <div key={request.id} className="rounded-lg border bg-background p-3 text-xs space-y-2">
+            <p className="text-muted-foreground">
+              {request.purchases?.suppliers?.name || "Vendor"} · bill {fmtDate(request.purchases?.created_at)} · request {fmtDate(request.created_at)}
+            </p>
+            <div className="grid gap-1 sm:grid-cols-2">
+              <p><span className="text-muted-foreground">Abhi: </span><span className="line-through">{changeSummary(request.old_values)}</span></p>
+              <p><span className="text-muted-foreground">Naya: </span><span className="font-semibold">{changeSummary(request.new_values)}</span></p>
+            </div>
+            <p><span className="text-muted-foreground">Reason: </span>{request.reason}</p>
+            <Input className="h-8 text-xs" placeholder="Note (mana karne par zaroori)"
+              value={notes[request.id] || ""} onChange={(e) => setNotes({ ...notes, [request.id]: e.target.value })} />
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+              <Button size="sm" variant="outline" className="text-xs" disabled={review.isPending} onClick={() => answer(request, false)}>
+                <X className="h-3.5 w-3.5" /> Mana karo
+              </Button>
+              <Button size="sm" className="text-xs" disabled={review.isPending} onClick={() => answer(request, true)}>
+                <Check className="h-3.5 w-3.5" /> Approve
+              </Button>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 const CORRECTION_UNITS = ["kg", "litre", "packet", "box", "piece", "crate", "bag", "bottle", "tray", "dozen"];
 
-function PurchaseCorrectionDialog({ purchase, line, ingredients, onClose }: {
+function PurchaseCorrectionDialog({ purchase, line, ingredients, isAdmin, onClose }: {
   purchase: any | null;
   line: any | null;
   ingredients: any[];
+  // Admins change the bill directly; everyone else sends it to them.
+  isAdmin: boolean;
   onClose: () => void;
 }) {
   const correctLine = useCorrectPurchaseLine();
+  const requestChange = useRequestPurchaseChange();
+  const busy = correctLine.isPending || requestChange.isPending;
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [ingredientId, setIngredientId] = useState("");
   const [newName, setNewName] = useState("");
@@ -131,6 +211,21 @@ function PurchaseCorrectionDialog({ purchase, line, ingredients, onClose }: {
       && Math.abs(qty - oldQuantity) < 0.000001
       && unit.toLowerCase() === oldUnit.toLowerCase();
     try {
+      if (!isAdmin) {
+        await requestChange.mutateAsync({
+          purchase_item_id: line.id,
+          ingredient_id: mode === "existing" ? ingredientId : null,
+          new_item_name: mode === "new" ? newName.trim() : null,
+          new_category: category,
+          new_unit: unit,
+          new_quantity: qty,
+          new_rate: itemRate,
+          reason: reason.trim(),
+        });
+        toast.success("Admin approval ke liye bhej diya. Approve hone tak bill aur stock pehle jaise rahenge.");
+        onClose();
+        return;
+      }
       const result = await correctLine.mutateAsync({
         purchase_item_id: line.id,
         ingredient_id: mode === "existing" ? ingredientId : null,
@@ -152,7 +247,7 @@ function PurchaseCorrectionDialog({ purchase, line, ingredients, onClose }: {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next && !correctLine.isPending) onClose(); }}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next && !busy) onClose(); }}>
       <DialogContent className="sm:max-w-xl max-h-[92vh] overflow-y-auto" onOpenAutoFocus={initialise}>
         <DialogHeader><DialogTitle>Galat invoice entry sudharo</DialogTitle></DialogHeader>
         {line && (
@@ -162,7 +257,9 @@ function PurchaseCorrectionDialog({ purchase, line, ingredients, onClose }: {
               <p className="font-semibold">{line.item_name} · {Number(line.quantity)} {line.unit} × ₹{Number(line.rate || 0).toLocaleString("en-IN")}</p>
             </div>
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
-              Invoice photo delete/change nahi hogi. Old aur new dono audit me rahenge. Agar is lot ka kuch saman kitchen ja chuka hai, app correction rok kar Admin review bolega.
+              {isAdmin
+                ? "Invoice photo delete/change nahi hogi. Old aur new dono audit me rahenge. Agar is lot ka kuch saman kitchen ja chuka hai, app correction rok dega."
+                : "Ye change Admin ke paas approval ke liye jayega. Approve hone tak bill, stock aur rate kuch nahi badlega. Old aur new dono audit me rahenge."}
             </div>
 
             <Tabs value={mode} onValueChange={(value) => setMode(value as "existing" | "new")}>
@@ -203,8 +300,10 @@ function PurchaseCorrectionDialog({ purchase, line, ingredients, onClose }: {
             </div>
             <div><Label>Galti kyu hui? (zaroori)</Label><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. bill me Amul Doodh tha, correct inventory item Amul Gold hai" /></div>
             <DialogFooter>
-              <Button variant="outline" onClick={onClose} disabled={correctLine.isPending}>Cancel</Button>
-              <Button onClick={save} disabled={correctLine.isPending}>{correctLine.isPending ? "Sudhar raha hai…" : "Correction save karo"}</Button>
+              <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
+              <Button onClick={save} disabled={busy}>
+                {busy ? "Bhej raha hai…" : isAdmin ? "Correction save karo" : "Admin approval ke liye bhejo"}
+              </Button>
             </DialogFooter>
           </>
         )}
@@ -471,7 +570,7 @@ function DeliveryEvidence({ canteenId }: { canteenId: string }) {
 
 export default function PurchasesPage() {
   const { selectedCanteen } = useAppContext();
-  const { roleData } = useAuth();
+  const { roleData, isOwner: isAdmin } = useAuth();
   const role = String(roleData?.role ?? "").toLowerCase();
   const canManagePurchases = role === "store_keeper"
     || ["admin", "super_admin", "owner"].includes(role);
@@ -597,6 +696,7 @@ export default function PurchasesPage() {
   return (
     <AppLayout title="Purchases & Suppliers">
       <div className="min-w-0 space-y-4 overflow-x-hidden animate-fade-in">
+        {isAdmin && <PurchaseChangeApprovals canteenId={selectedCanteen} />}
         {canManagePurchases && <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
           {selectedCanteen !== "all" && <DeliveryEvidence canteenId={selectedCanteen} />}
           <Dialog open={supplierDialog} onOpenChange={setSupplierDialog}>
@@ -840,6 +940,7 @@ export default function PurchasesPage() {
           purchase={correctionTarget?.purchase || null}
           line={correctionTarget?.line || null}
           ingredients={(ingredients || []) as any[]}
+          isAdmin={isAdmin}
           onClose={() => setCorrectionTarget(null)}
         />
       )}

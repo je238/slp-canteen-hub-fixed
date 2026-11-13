@@ -177,7 +177,7 @@ export function usePurchases(canteenId?: string) {
     queryKey: ["purchases", canteenId, REPORTING_CUTOVER_TIMESTAMP],
     queryFn: async () => {
       let q = supabase.from("purchases" as any)
-        .select("*, suppliers(name), purchase_items(*), purchase_invoice_files(*), purchase_line_corrections(*)")
+        .select("*, suppliers(name), purchase_items(*), purchase_invoice_files(*), purchase_line_corrections(*), purchase_change_requests(*)")
         .gte("created_at", REPORTING_CUTOVER_TIMESTAMP)
         .order("created_at", { ascending: false });
       if (canteenId && canteenId !== "all") q = q.eq("canteen_id", canteenId);
@@ -348,6 +348,83 @@ export function useCorrectPurchaseLine() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["ingredients"] });
+      qc.invalidateQueries({ queryKey: ["ingredientRates"] });
+      qc.invalidateQueries({ queryKey: ["storeKeeperDashboard"] });
+      qc.invalidateQueries({ queryKey: ["periodSummary"] });
+    },
+  });
+}
+
+// From 13 Nov 2026 a received bill changes only after an Admin approves:
+// the store keeper files the change, nothing moves until review.
+type PurchaseLineChangeInput = {
+  purchase_item_id: string;
+  ingredient_id?: string | null;
+  new_item_name?: string | null;
+  new_category?: string | null;
+  new_unit: string;
+  new_quantity: number;
+  new_rate: number;
+  reason: string;
+};
+
+export function useRequestPurchaseChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: PurchaseLineChangeInput) => {
+      const { data, error } = await supabase.rpc("request_purchase_line_change" as any, {
+        p_purchase_item_id: input.purchase_item_id,
+        p_ingredient_id: input.ingredient_id || null,
+        p_new_item_name: input.new_item_name || null,
+        p_new_category: input.new_category || "Uncategorised",
+        p_new_unit: input.new_unit,
+        p_new_quantity: input.new_quantity,
+        p_new_rate: input.new_rate,
+        p_reason: input.reason,
+      });
+      if (error) throw error;
+      return data as any;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["pendingPurchaseChanges"] });
+    },
+  });
+}
+
+export function usePendingPurchaseChanges(canteenId?: string, enabled = true) {
+  return useQuery({
+    queryKey: ["pendingPurchaseChanges", canteenId],
+    enabled,
+    queryFn: async () => {
+      let q = supabase.from("purchase_change_requests" as any)
+        .select("*, purchases(created_at, suppliers(name))")
+        .eq("status", "pending")
+        .order("created_at", { ascending: true });
+      if (canteenId && canteenId !== "all") q = q.eq("canteen_id", canteenId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return data as any[];
+    },
+  });
+}
+
+export function useReviewPurchaseChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { request_id: string; approve: boolean; note?: string }) => {
+      const { data, error } = await supabase.rpc("review_purchase_line_change" as any, {
+        p_request_id: input.request_id,
+        p_approve: input.approve,
+        p_note: input.note || null,
+      });
+      if (error) throw error;
+      return data as any;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["purchases"] });
+      qc.invalidateQueries({ queryKey: ["pendingPurchaseChanges"] });
       qc.invalidateQueries({ queryKey: ["ingredients"] });
       qc.invalidateQueries({ queryKey: ["ingredientRates"] });
       qc.invalidateQueries({ queryKey: ["storeKeeperDashboard"] });
