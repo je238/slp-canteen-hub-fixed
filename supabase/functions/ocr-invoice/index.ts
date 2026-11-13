@@ -222,10 +222,13 @@ async function pickModels(key: string): Promise<Model[]> {
       const byVersion = (lite: boolean) => names.filter((n) => n.endsWith("-lite") === lite)
         .sort((a, b) => version(b) - version(a));
       // The newest Flash is also the busiest: on 13 Nov 2026 gemini-3.8-flash
-      // answered "high demand" or timed out on every bill while the older
-      // Flash read them. So the Flash one version back is kept as a second
-      // reader, ahead of Lite.
-      const [flash, previousFlash] = byVersion(false);
+      // answered "high demand" or timed out on every bill, and so did 3.7.
+      // So the Flash that read every bill through October (3.5) is kept as
+      // the second reader, ahead of Lite; once Google retires it, the Flash
+      // one version back takes its place.
+      const flashes = byVersion(false);
+      const flash = flashes[0];
+      const previousFlash = flashes.find((n) => n !== flash && n === MODELS[0].name) ?? flashes[1];
       const lite = byVersion(true)[0];
       const list: Model[] = [];
       if (flash) list.push({ name: flash, timeoutMs: MODELS[0].timeoutMs });
