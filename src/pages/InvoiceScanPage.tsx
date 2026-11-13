@@ -35,7 +35,15 @@ interface ScannedItem {
   stock_unit?: string;
   conversion_confirmed?: boolean;
   conversion_note?: string;
+  // Came on the bill but sent back at the gate (spoilt, expired). Only the
+  // rest goes into stock and onto the purchase. In the bill's unit.
+  returned_qty?: number;
+  return_reason?: string;
 }
+
+const returnedOf = (i: ScannedItem) => Math.max(0, Number(i.returned_qty) || 0);
+const keptOf = (i: ScannedItem) => Math.max(0, i.quantity - returnedOf(i));
+const returnedValue = (items: ScannedItem[]) => items.reduce((s, i) => s + returnedOf(i) * i.rate, 0);
 
 const canonicalUnit = (unit?: string) => {
   const u = (unit || "").trim().toLowerCase();
@@ -462,6 +470,14 @@ export default function InvoiceScanPage() {
     if (!pendingImage) { toast.error("Pehle invoice ki photo lagayein"); return; }
     const lines = scannedItems.filter(i => i.item_name?.trim() && i.quantity > 0);
     if (!lines.length) { toast.error("Invoice ka kam se kam ek item bharein"); return; }
+    const overReturned = lines.find(i => returnedOf(i) > i.quantity);
+    if (overReturned) {
+      toast.error(`${overReturned.item_name}: wapas ${returnedOf(overReturned)} bill ki quantity ${overReturned.quantity} se zyada hai`);
+      return;
+    }
+    const noReason = lines.find(i => returnedOf(i) > 0 && !i.return_reason?.trim());
+    if (noReason) { toast.error(`${noReason.item_name}: wapas kyu kiya? reason likhein (jaise kharab / expiry)`); return; }
+    if (!lines.some(i => keptOf(i) > 0)) { toast.error("Saara maal wapas hai — stock mein kuch nahi jayega"); return; }
     const unresolved = lines.find(i => !canonicalUnit(i.unit));
     if (unresolved) {
       toast.error(`${unresolved.item_name}: bill ki unit clear nahi hai — kg, litre, box, packet ya pcs likhein`);
@@ -486,24 +502,43 @@ export default function InvoiceScanPage() {
         invoiceMeta?.gstin ? `GSTIN ${invoiceMeta.gstin}` : null,
         invoiceMeta?.grand_total ? `Grand total ₹${invoiceMeta.grand_total}` : null,
       ].filter(Boolean).join(" · ");
+      // What was sent back at the gate never enters stock or the purchase:
+      // each line goes in at the kept quantity, and the note says what went back.
+      const returnNote = lines.filter(i => returnedOf(i) > 0)
+        .map(i => `${i.item_name.trim()} ${returnedOf(i)} ${i.unit} (${i.return_reason!.trim()})`).join(", ");
+      const baseNotes = metaBits
+        ? `${metaBits} · ${byHand ? "Typed manually from" : "Scanned from"} ${fileName}`
+        : `${byHand ? "Typed manually from invoice photo" : "Scanned from invoice"}: ${fileName}`;
       // Straight into stock under the names as corrected on screen. An item
       // the site has never seen is created; one it already knows is topped up.
       const { data, error } = await supabase.rpc("add_stock_from_invoice" as any, {
         p_canteen_id: selectedCanteen,
         p_supplier_id: supplierId || null,
         p_items: lines
-          .map(i => ({
-            name: i.item_name.trim(), quantity: i.quantity, unit: i.unit,
-            rate: i.rate, total: i.total,
-            stock_quantity: i.stock_quantity, stock_unit: i.stock_unit,
-            conversion_confirmed: i.conversion_confirmed,
-            conversion_note: i.conversion_note,
-          })),
-        p_notes: metaBits
-          ? `${metaBits} · ${byHand ? "Typed manually from" : "Scanned from"} ${fileName}`
-          : `${byHand ? "Typed manually from invoice photo" : "Scanned from invoice"}: ${fileName}`,
+          .filter(i => keptOf(i) > 0)
+          .map(i => {
+            const kept = keptOf(i);
+            const returned = returnedOf(i);
+            // A converted line (boxes on the bill, kg on the shelf) keeps the same ratio.
+            const stockQty = i.stock_quantity != null && returned > 0
+              ? Math.round(i.stock_quantity * (kept / i.quantity) * 1000) / 1000
+              : i.stock_quantity;
+            const returnText = returned > 0
+              ? `Bill ${i.quantity} ${i.unit}, ${returned} ${i.unit} wapas (${i.return_reason!.trim()}), ${kept} ${i.unit} stock mein`
+              : null;
+            return {
+              name: i.item_name.trim(), quantity: kept, unit: i.unit,
+              rate: i.rate, total: Math.round(kept * i.rate * 100) / 100,
+              stock_quantity: stockQty, stock_unit: i.stock_unit,
+              conversion_confirmed: i.conversion_confirmed,
+              conversion_note: [i.conversion_note, returnText].filter(Boolean).join(" · ") || undefined,
+            };
+          }),
+        p_notes: returnNote ? `${baseNotes} · Wapas kiya: ${returnNote}` : baseNotes,
         p_image_path: invoice_image_url,
-        p_total: invoiceMeta?.grand_total ?? null,
+        p_total: invoiceMeta?.grand_total != null
+          ? Math.round((invoiceMeta.grand_total - returnedValue(lines)) * 100) / 100
+          : null,
       });
       if (error) throw error;
       const res = data as any;
@@ -818,6 +853,29 @@ export default function InvoiceScanPage() {
                           <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </div>
+                      <div className="mt-2 flex items-end gap-2 flex-wrap">
+                        <div className="w-28">
+                          <Label className="text-[10px]">Kharab / wapas ({item.unit || "qty"})</Label>
+                          <Input type="number" min="0" step="any" className="h-8 text-xs" placeholder="0"
+                            value={item.returned_qty ?? ""}
+                            onChange={e => updateScannedItem(idx, { returned_qty: e.target.value === "" ? undefined : Number(e.target.value) })} />
+                        </div>
+                        {returnedOf(item) > 0 && (
+                          <>
+                            <div className="min-w-40 flex-1">
+                              <Label className="text-[10px]">Kyu wapas kiya?</Label>
+                              <Input className="h-8 text-xs" placeholder="jaise kharab / sada / expiry"
+                                value={item.return_reason || ""}
+                                onChange={e => updateScannedItem(idx, { return_reason: e.target.value })} />
+                            </div>
+                            <p className={`w-full text-xs font-semibold ${returnedOf(item) > item.quantity ? "text-destructive" : "text-emerald-700"}`}>
+                              {returnedOf(item) > item.quantity
+                                ? `Wapas bill se zyada hai (${item.quantity} ${item.unit})`
+                                : `Stock aur purchase mein sirf ${keptOf(item)} ${item.unit} chadega · ₹${(keptOf(item) * item.rate).toLocaleString("en-IN")}`}
+                            </p>
+                          </>
+                        )}
+                      </div>
                       {(() => {
                         const master = (ingredients || []).find((g: any) => g.id === item.ingredient_id)?.unit;
                         const unresolved = !canonicalUnit(item.unit);
@@ -880,8 +938,13 @@ export default function InvoiceScanPage() {
               <div className="flex items-center gap-3">
                 <span className="text-sm font-semibold">
                   {invoiceMeta?.grand_total
-                    ? <>Payable: ₹{invoiceMeta.grand_total.toLocaleString()}</>
-                    : <>Total: ₹{scannedItems.reduce((s, i) => s + i.total, 0).toLocaleString()}</>}
+                    ? <>Payable: ₹{(invoiceMeta.grand_total - returnedValue(scannedItems)).toLocaleString("en-IN")}</>
+                    : <>Total: ₹{scannedItems.reduce((s, i) => s + keptOf(i) * i.rate, 0).toLocaleString("en-IN")}</>}
+                  {returnedValue(scannedItems) > 0 && (
+                    <span className="block text-[11px] font-normal text-muted-foreground">
+                      wapas maal ₹{returnedValue(scannedItems).toLocaleString("en-IN")} kam kiya
+                    </span>
+                  )}
                 </span>
                 <Button onClick={handleConfirmDraft} disabled={saving}
                         className="bg-accent text-accent-foreground hover:bg-accent/90 gap-1.5">
