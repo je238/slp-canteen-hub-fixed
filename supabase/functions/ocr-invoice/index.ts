@@ -565,24 +565,29 @@ serve(async (req) => {
     // hung model. So both Flash models are asked at the same moment (the
     // account pays per request, two Flash reads cost a few paise) and the
     // first one with lines wins; Lite gets the photo only if both fail.
-    // A request that has not answered in 20 s is usually stuck behind
-    // Google's queue, not thinking (a bill reads in 9-17 s), so the photo is
-    // sent once more to the older Flash; whichever copy answers first wins.
+    // Every request is paid for: asking both Flash models at once cost about
+    // ₹3.6 a bill (₹91 for ~25 test scans on 13 Nov 2026). So one Flash reads
+    // the bill (9-17 s normally); only if it has not answered in 15 s, or
+    // fails sooner, is the other Flash asked too, and the first answer wins.
     // Low thinking would be faster but read 7-8 of 11 handwritten lines.
-    // 20 + 50 + 25 s stays inside the app's 120 s wait.
+    // 15 + 70 + 25 s stays inside the app's 120 s wait.
     const geminiRead = (async (): Promise<Record<string, unknown>> => {
       const found = await pickModels(geminiKey);
       if (found.length > 2) {
-        const first = Promise.any([
-          askGemini({ ...found[0], timeoutMs: 70_000 }),
-          askGemini({ ...found[1], timeoutMs: 70_000 }),
-        ]);
-        const resend = new Promise<Record<string, unknown>>((resolve, reject) => {
-          const timer = setTimeout(() => askGemini({ ...found[1], timeoutMs: 50_000 }).then(resolve, reject), 20_000);
-          first.then(() => clearTimeout(timer), () => { clearTimeout(timer); reject(new Error("both Flash failed")); });
+        const first = askGemini({ ...found[1], timeoutMs: 85_000 });
+        const backup = new Promise<Record<string, unknown>>((resolve, reject) => {
+          let started = false;
+          const start = () => {
+            if (started) return;
+            started = true;
+            askGemini({ ...found[0], timeoutMs: 70_000 }).then(resolve, reject);
+          };
+          const timer = setTimeout(start, 15_000);
+          first.then(() => { clearTimeout(timer); if (!started) reject(new Error("not needed")); },
+                     () => { clearTimeout(timer); start(); });
         });
         try {
-          return await Promise.any([first, resend]);
+          return await Promise.any([first, backup]);
         } catch {
           return await askGemini({ ...found[2], timeoutMs: 25_000 });
         }
