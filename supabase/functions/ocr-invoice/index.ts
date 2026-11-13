@@ -407,6 +407,8 @@ serve(async (req) => {
     }
 
     const { imageBase64, mimeType, mode, canteenId } = await req.json();
+    const scanStarted = Date.now();
+    let answeredBy = "";   // which reader won, sent back so scan speed can be measured
     if (!imageBase64) throw new Error("No image provided");
     const isMenu = mode === "menu";
 
@@ -544,6 +546,7 @@ serve(async (req) => {
         // A model can return valid JSON while treating an informal handwritten
         // cash memo as having no lines. That is a miss, so another reader tries.
         if (!usefulResult(candidate)) { sawTransient = true; throw new Error(`${model.name} returned no invoice lines`); }
+        answeredBy ||= model.name;
         return candidate;
       } catch (error) {
         const timedOut = error instanceof DOMException && error.name === "AbortError";
@@ -562,15 +565,24 @@ serve(async (req) => {
     // hung model. So both Flash models are asked at the same moment (the
     // account pays per request, two Flash reads cost a few paise) and the
     // first one with lines wins; Lite gets the photo only if both fail.
-    // 90 + 25 s stays inside the app's 120 s wait.
+    // A request that has not answered in 20 s is usually stuck behind
+    // Google's queue, not thinking (a bill reads in 9-17 s), so the photo is
+    // sent once more to the older Flash; whichever copy answers first wins.
+    // Low thinking would be faster but read 7-8 of 11 handwritten lines.
+    // 20 + 50 + 25 s stays inside the app's 120 s wait.
     const geminiRead = (async (): Promise<Record<string, unknown>> => {
       const found = await pickModels(geminiKey);
       if (found.length > 2) {
+        const first = Promise.any([
+          askGemini({ ...found[0], timeoutMs: 70_000 }),
+          askGemini({ ...found[1], timeoutMs: 70_000 }),
+        ]);
+        const resend = new Promise<Record<string, unknown>>((resolve, reject) => {
+          const timer = setTimeout(() => askGemini({ ...found[1], timeoutMs: 50_000 }).then(resolve, reject), 20_000);
+          first.then(() => clearTimeout(timer), () => { clearTimeout(timer); reject(new Error("both Flash failed")); });
+        });
         try {
-          return await Promise.any([
-            askGemini({ ...found[0], timeoutMs: 90_000 }),
-            askGemini({ ...found[1], timeoutMs: 90_000 }),
-          ]);
+          return await Promise.any([first, resend]);
         } catch {
           return await askGemini({ ...found[2], timeoutMs: 25_000 });
         }
@@ -617,7 +629,7 @@ serve(async (req) => {
       ? { ...(parsed.invoice as Record<string, unknown>),
           vendor_name: cleanVendorName((parsed.invoice as Record<string, unknown>).vendor_name) }
       : null;
-    return new Response(JSON.stringify({ items, invoice }), {
+    return new Response(JSON.stringify({ items, invoice, answeredBy: answeredBy || "claude", ms: Date.now() - scanStarted }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
