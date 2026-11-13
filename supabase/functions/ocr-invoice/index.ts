@@ -219,11 +219,18 @@ async function pickModels(key: string): Promise<Model[]> {
         // stable names only: no -preview, -exp, -tts, -image, dated snapshots
         .filter((n) => /^gemini-\d+(\.\d+)?-flash(-lite)?$/.test(n));
       const version = (n: string) => parseFloat(n.match(/^gemini-(\d+(?:\.\d+)?)/)![1]);
-      const newest = (lite: boolean) => names.filter((n) => n.endsWith("-lite") === lite)
-        .sort((a, b) => version(b) - version(a))[0];
+      const byVersion = (lite: boolean) => names.filter((n) => n.endsWith("-lite") === lite)
+        .sort((a, b) => version(b) - version(a));
+      // The newest Flash is also the busiest: on 13 Nov 2026 gemini-3.8-flash
+      // answered "high demand" or timed out on every bill while the older
+      // Flash read them. So the Flash one version back is kept as a second
+      // reader, ahead of Lite.
+      const [flash, previousFlash] = byVersion(false);
+      const lite = byVersion(true)[0];
       const list: Model[] = [];
-      if (newest(false)) list.push({ name: newest(false)!, timeoutMs: MODELS[0].timeoutMs });
-      if (newest(true)) list.push({ name: newest(true)!, timeoutMs: MODELS[1].timeoutMs });
+      if (flash) list.push({ name: flash, timeoutMs: MODELS[0].timeoutMs });
+      if (previousFlash) list.push({ name: previousFlash, timeoutMs: MODELS[0].timeoutMs });
+      if (lite) list.push({ name: lite, timeoutMs: MODELS[1].timeoutMs });
       if (list.length) {
         modelCache = { at: Date.now(), list };
         return list;
@@ -440,8 +447,12 @@ serve(async (req) => {
     // over 45 s on a clean printed bill, so 45 + 40 + 20 s timed out on all
     // three tries; one long Flash try beats two short ones, and Lite needs
     // ~30 s on a real photo, not 20.
+    // With two Flash versions on offer: newest 45 s, the one before 45 s,
+    // Lite 25 s, still inside 120 s.
     const found = await pickModels(geminiKey);
-    const models: Model[] = found.length > 1
+    const models: Model[] = found.length > 2
+      ? [{ ...found[0], timeoutMs: 45_000 }, { ...found[1], timeoutMs: 45_000 }, { ...found[2], timeoutMs: 25_000 }]
+      : found.length > 1
       ? [{ ...found[0], timeoutMs: 70_000 }, { ...found[1], timeoutMs: 40_000 }]
       : [{ ...found[0], timeoutMs: 60_000 }, { ...found[0], timeoutMs: 50_000 }];
     const retired = new Set<string>();
