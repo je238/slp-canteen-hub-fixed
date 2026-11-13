@@ -510,96 +510,76 @@ serve(async (req) => {
     let sawTransient = false;
     let lastError = "No OCR model succeeded";
 
-    // One bounded attempt per fallback model. Transient failures back off before
-    // trying the next model, keeping total attempts and total execution bounded.
-    // Flash reads handwriting; Lite mostly cannot. When Flash hiccups (an
-    // empty answer, a 503) it gets a second go before Lite is tried — going
-    // straight to Lite turned one bad second at Google into a failed scan.
-    // 70 + 40 s stays inside the app's 120 s wait. On 1 Nov 2026 Flash took
-    // over 45 s on a clean printed bill, so 45 + 40 + 20 s timed out on all
-    // three tries; one long Flash try beats two short ones, and Lite needs
-    // ~30 s on a real photo, not 20.
-    // With two Flash versions on offer: newest 45 s, the one before 45 s,
-    // Lite 25 s, still inside 120 s.
-    const geminiRead = (async (): Promise<Record<string, unknown>> => {
-    let geminiParsed: Record<string, unknown> | null = null;
-    const found = await pickModels(geminiKey);
-    const models: Model[] = found.length > 2
-      ? [{ ...found[0], timeoutMs: 45_000 }, { ...found[1], timeoutMs: 45_000 }, { ...found[2], timeoutMs: 25_000 }]
-      : found.length > 1
-      ? [{ ...found[0], timeoutMs: 70_000 }, { ...found[1], timeoutMs: 40_000 }]
-      : [{ ...found[0], timeoutMs: 60_000 }, { ...found[0], timeoutMs: 50_000 }];
-    const retired = new Set<string>();
-    for (let attempt = 0; attempt < models.length; attempt += 1) {
-      const model = models[attempt];
-      if (retired.has(model.name)) continue;
+    // One request to one Google model: its lines, or an error saying why not.
+    const askGemini = async (model: Model): Promise<Record<string, unknown>> => {
       try {
-        const response = await fetchWithTimeout(
+        let response = await fetchWithTimeout(
           `https://generativelanguage.googleapis.com/v1beta/models/${model.name}:generateContent`,
-          {
-            method: "POST",
-            headers: {
-              "x-goog-api-key": geminiKey,
-              "Content-Type": "application/json",
-            },
-            body: bodyFor(lowThinking),
-          },
+          { method: "POST", headers: { "x-goog-api-key": geminiKey, "Content-Type": "application/json" }, body: bodyFor(lowThinking) },
           model.timeoutMs,
         );
-
         if (response.status === 400 && lowThinking) {
           const detail = (await response.clone().text()).slice(0, 300);
           if (/thinking/i.test(detail)) {
             console.warn("thinkingLevel refused, retrying without:", detail);
-            lowThinking = false;
-            attempt -= 1;          // same model again, plain request
-            continue;
+            lowThinking = false;   // same model again, plain request
+            response = await fetchWithTimeout(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model.name}:generateContent`,
+              { method: "POST", headers: { "x-goog-api-key": geminiKey, "Content-Type": "application/json" }, body: bodyFor(false) },
+              model.timeoutMs,
+            );
           }
         }
-
-        if (response.ok) {
-          const data = await response.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-          try {
-            const candidate = JSON.parse(text) as Record<string, unknown>;
-            if (usefulResult(candidate)) {
-              geminiParsed = candidate;
-              break;
-            }
-            // A model can successfully return valid JSON while treating an
-            // informal handwritten cash memo as having no invoice lines. That
-            // is an extraction miss, so let the fallback vision model try the
-            // same photo instead of reporting "take a clearer photo".
-            sawTransient = true;
-            lastError = `${model.name} returned no invoice lines`;
-            console.warn("Gemini empty extraction:", lastError);
-          } catch {
-            sawTransient = true;
-            lastError = `${model.name} returned invalid JSON`;
-            console.error("Gemini response error:", lastError);
-          }
-        } else {
+        if (!response.ok) {
           const detail = (await response.text()).slice(0, 300);
-          lastError = `${model.name} -> ${response.status}: ${detail}`;
-          console.error("Gemini API error:", lastError);
           sawRateLimit ||= response.status === 429;
           sawTransient ||= isTransientStatus(response.status);
-          if (response.status === 404) { modelCache = null; retired.add(model.name); }   // retired: skip it, ask Google again next time
+          if (response.status === 404) modelCache = null;   // retired: ask Google again next time
+          throw new Error(`${model.name} -> ${response.status}: ${detail}`);
         }
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+        let candidate: Record<string, unknown>;
+        try { candidate = JSON.parse(text); } catch { sawTransient = true; throw new Error(`${model.name} returned invalid JSON`); }
+        // A model can return valid JSON while treating an informal handwritten
+        // cash memo as having no lines. That is a miss, so another reader tries.
+        if (!usefulResult(candidate)) { sawTransient = true; throw new Error(`${model.name} returned no invoice lines`); }
+        return candidate;
       } catch (error) {
         const timedOut = error instanceof DOMException && error.name === "AbortError";
-        sawTransient = true;
+        if (timedOut) sawTransient = true;
         lastError = timedOut
           ? `${model.name} timed out after ${model.timeoutMs}ms`
-          : `${model.name} request failed: ${error instanceof Error ? error.message : String(error)}`;
-        console.error("Gemini transport error:", lastError);
+          : error instanceof Error ? error.message : String(error);
+        console.error("Gemini error:", lastError);
+        throw new Error(lastError);
       }
+    };
 
-      // Fail over immediately. Sleeping here consumed the worker deadline and
-      // turned a recoverable provider error into a platform-level 503.
-    }
-    if (!geminiParsed) throw new Error(lastError);
-    return geminiParsed;
+    // Flash reads handwriting; Lite mostly cannot. In Nov 2026 Google's Flash
+    // models were overloaded for days: the newest answered "high demand" or
+    // hung, and asking them one after the other made a bill wait 45 s per
+    // hung model. So both Flash models are asked at the same moment (the
+    // account pays per request, two Flash reads cost a few paise) and the
+    // first one with lines wins; Lite gets the photo only if both fail.
+    // 90 + 25 s stays inside the app's 120 s wait.
+    const geminiRead = (async (): Promise<Record<string, unknown>> => {
+      const found = await pickModels(geminiKey);
+      if (found.length > 2) {
+        try {
+          return await Promise.any([
+            askGemini({ ...found[0], timeoutMs: 90_000 }),
+            askGemini({ ...found[1], timeoutMs: 90_000 }),
+          ]);
+        } catch {
+          return await askGemini({ ...found[2], timeoutMs: 25_000 });
+        }
+      }
+      try {
+        return await askGemini({ ...found[0], timeoutMs: 70_000 });
+      } catch {
+        return await askGemini({ ...(found[1] || found[0]), timeoutMs: 40_000 });
+      }
     })();
 
     // Whichever reader brings back lines first is the answer.
