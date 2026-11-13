@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -179,6 +180,50 @@ const MODELS = [
   { name: "gemini-3.5-flash", timeoutMs: 75_000 },
   { name: "gemini-3.5-flash-lite", timeoutMs: 30_000 },
 ];
+
+// Gemini's schema dialect (OBJECT, nullable: true) as plain JSON Schema for
+// Claude's structured output.
+function toJsonSchema(s: Record<string, unknown>): Record<string, unknown> {
+  const type = String(s.type).toLowerCase();
+  const out: Record<string, unknown> = { type: s.nullable ? [type, "null"] : type };
+  if (s.description) out.description = s.description;
+  if (type === "object") {
+    const props = (s.properties || {}) as Record<string, Record<string, unknown>>;
+    out.properties = Object.fromEntries(Object.entries(props).map(([k, v]) => [k, toJsonSchema(v)]));
+    out.required = s.required || Object.keys(props);
+    out.additionalProperties = false;
+  }
+  if (type === "array") out.items = toJsonSchema(s.items as Record<string, unknown>);
+  return out;
+}
+
+// Claude reads the same photo alongside Google. Google's Flash models were
+// overloaded for days in Nov 2026 ("high demand" / timeouts) and a bill
+// waited two to five minutes or failed; now whichever reader answers first
+// with lines wins. Effort low: reading a bill needs eyes, not deliberation.
+async function readWithClaude(
+  key: string, system: string, prompt: string, imageBase64: string, mimeType: string,
+  schema: Record<string, unknown>, timeoutMs: number,
+): Promise<Record<string, unknown>> {
+  const client = new Anthropic({ apiKey: key, timeout: timeoutMs, maxRetries: 0 });
+  const media = (mimeType || "image/jpeg").toLowerCase();
+  const picture = media === "application/pdf"
+    ? { type: "document" as const, source: { type: "base64" as const, media_type: "application/pdf" as const, data: imageBase64 } }
+    : { type: "image" as const, source: { type: "base64" as const, media_type: media as "image/jpeg", data: imageBase64 } };
+  const response = await client.beta.messages.create({
+    model: "claude-opus-5-5",
+    max_tokens: 16000,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    system,
+    output_config: { effort: "low", format: { type: "json_schema", schema } },
+    messages: [{ role: "user", content: [picture, { type: "text", text: prompt }] }],
+  } as any);
+  if (response.stop_reason === "refusal") throw new Error("claude refused");
+  const text = response.content.find((b: any) => b.type === "text")?.text;
+  if (!text) throw new Error(`claude returned no text (${response.stop_reason})`);
+  return JSON.parse(text);
+}
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
@@ -437,6 +482,30 @@ serve(async (req) => {
     let lowThinking = true;
 
     let parsed: Record<string, unknown> | null = null;
+    const usefulResult = (c: Record<string, unknown>) => isMenu
+      ? Array.isArray(c.menu)
+      : Array.isArray(c.items) && c.items.length > 0;
+
+    // Claude starts at once and runs beside the Google chain below.
+    const claudeKey = Deno.env.get("ANTHROPIC_API_KEY");
+    let claudeError = "";
+    const claudeRead: Promise<Record<string, unknown>> = claudeKey
+      ? readWithClaude(
+          claudeKey, (isMenu ? MENU_PROMPT : SYSTEM_PROMPT) + knownBlock,
+          isMenu
+            ? "Read this menu chart:"
+            : "Read this invoice or handwritten Hindi cash memo. Extract every visible goods row, including handwritten Devanagari rows:",
+          imageBase64, mimeType, toJsonSchema(isMenu ? MENU_SCHEMA : RESPONSE_SCHEMA), 110_000,
+        ).then((c) => {
+          if (!usefulResult(c)) throw new Error("claude returned no invoice lines");
+          return c;
+        })
+      : Promise.reject(new Error("ANTHROPIC_API_KEY not configured"));
+    claudeRead.catch((error) => {
+      claudeError = error instanceof Error ? error.message : String(error);
+      console.error("Claude read failed:", claudeError);
+    });
+
     let sawRateLimit = false;
     let sawTransient = false;
     let lastError = "No OCR model succeeded";
@@ -452,6 +521,8 @@ serve(async (req) => {
     // ~30 s on a real photo, not 20.
     // With two Flash versions on offer: newest 45 s, the one before 45 s,
     // Lite 25 s, still inside 120 s.
+    const geminiRead = (async (): Promise<Record<string, unknown>> => {
+    let geminiParsed: Record<string, unknown> | null = null;
     const found = await pickModels(geminiKey);
     const models: Model[] = found.length > 2
       ? [{ ...found[0], timeoutMs: 45_000 }, { ...found[1], timeoutMs: 45_000 }, { ...found[2], timeoutMs: 25_000 }]
@@ -491,11 +562,8 @@ serve(async (req) => {
           const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
           try {
             const candidate = JSON.parse(text) as Record<string, unknown>;
-            const hasUsefulResult = isMenu
-              ? Array.isArray(candidate.menu)
-              : Array.isArray(candidate.items) && candidate.items.length > 0;
-            if (hasUsefulResult) {
-              parsed = candidate;
+            if (usefulResult(candidate)) {
+              geminiParsed = candidate;
               break;
             }
             // A model can successfully return valid JSON while treating an
@@ -529,6 +597,17 @@ serve(async (req) => {
 
       // Fail over immediately. Sleeping here consumed the worker deadline and
       // turned a recoverable provider error into a platform-level 503.
+    }
+    if (!geminiParsed) throw new Error(lastError);
+    return geminiParsed;
+    })();
+
+    // Whichever reader brings back lines first is the answer.
+    try {
+      parsed = await Promise.any([claudeRead, geminiRead]);
+    } catch {
+      parsed = null;
+      if (claudeError) lastError = `${lastError} | ${claudeError}`;
     }
 
     if (!parsed) {
