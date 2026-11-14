@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Package, ChefHat, Truck, ScanLine, Wallet, BarChart3,
   Building2, ClipboardCheck, Shield, Store, CalendarDays, ClipboardList,
-  FileUp, Target, History, AlertTriangle, ArrowLeftRight,
+  FileUp, Target, History, AlertTriangle, ArrowLeftRight, UserCheck,
 } from "lucide-react";
 
 // One list drives both the sidebar and the route guards. They used to be
@@ -95,6 +95,10 @@ export const NAV: NavEntry[] = [
     roles: ["ops_manager", ...ADMIN_UP] },
   // Managers too: every count is reported to them, and the notification links here.
   { path: "/stock-audit", label: "Stock Verification", icon: ClipboardCheck, roles: ["store_keeper", ...MANAGER_READ] },
+
+  // Staff attendance: who came, when, from the canteen itself.
+  { path: "/staff-attendance", label: "Staff Attendance", icon: UserCheck,
+    roles: [...APPROVAL_MANAGERS, "ops_manager", ...ADMIN_UP] },
 
   // Administration
   { path: "/canteens", label: "Sites", icon: Building2,

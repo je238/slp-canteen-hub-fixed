@@ -34,6 +34,8 @@ import AuditLogPage from "./pages/AuditLogPage";
 import ExecutiveAlertsPage from "./pages/ExecutiveAlertsPage";
 import CentralKitchenPage from "./pages/CentralKitchenPage";
 import MealProfitPage from "./pages/MealProfitPage";
+import StaffAttendancePage from "./pages/StaffAttendancePage";
+import AttendancePage from "./pages/AttendancePage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -69,6 +71,8 @@ const App = () => (
               <Sonner />
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                {/* Staff mark their own attendance here: no app account, mobile + PIN */}
+                <Route path="/attendance" element={<StaffAttendancePage />} />
 
                 <Route path="/" element={
                   <ProtectedRoute><RoleHome /></ProtectedRoute>
@@ -140,6 +144,9 @@ const App = () => (
                 {/* Administration */}
                 <Route path="/canteens" element={
                   <ProtectedRoute minRole="unit_manager"><CanteenPage /></ProtectedRoute>
+                } />
+                <Route path="/staff-attendance" element={
+                  <ProtectedRoute minRole="unit_manager"><AttendancePage /></ProtectedRoute>
                 } />
                 <Route path="/users" element={
                   <ProtectedRoute minRole="admin"><UserManagementPage /></ProtectedRoute>
