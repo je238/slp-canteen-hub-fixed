@@ -28,7 +28,7 @@ import { fmtDate, fmtDateTime, fmtDayDate, shiftIst, todayIst, tomorrowIst, yest
 import { requisitionMenuDishes } from "@/lib/requisitionMenu";
 import { parseReviewQty } from "@/lib/requisitionReviewQty";
 import KitchenPlan from "@/components/KitchenPlan";
-import { ReturnButton, PendingReturns } from "@/components/KitchenReturns";
+import { ReturnButton, PendingReturns, StoreKitchenActions } from "@/components/KitchenReturns";
 import VoiceReasonInput from "@/components/VoiceReasonInput";
 
 // The approval chain on one screen, shown according to who is looking:
@@ -933,6 +933,7 @@ export default function RequisitionsPage() {
               })()}
             </TableBody>
           </Table>
+          <StoreKitchenActions requisition={r} />
         </div>
         )}
       </CardContent>

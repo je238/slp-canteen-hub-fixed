@@ -2,13 +2,15 @@ import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   useReturnableItems, useKitchenReturns, useReturnToStore, useAcceptReturn,
+  useStoreTakeBack, useIssueExtraToKitchen,
 } from "@/hooks/useSrsData";
+import { useIngredients } from "@/hooks/useSupabaseData";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Undo2, PackageCheck, X } from "lucide-react";
+import { Undo2, PackageCheck, PackagePlus, X } from "lucide-react";
 import { fmtDateTime } from "@/lib/date";
 import VoiceReasonInput from "@/components/VoiceReasonInput";
 import { toast } from "sonner";
@@ -163,5 +165,192 @@ export function PendingReturns({ canteenId }: { canteenId: string }) {
         ))}
       </CardContent>
     </Card>
+  );
+}
+
+// ---------------- The store's own entries ----------------
+// Store Keeper / Manager record, on an order already handed over:
+//   · Bacha saman wapas liya: straight back on the shelf (they are receiving it)
+//   · Extra saman diya: more given to the kitchen than the order, with a reason;
+//     booked on the same order so that meal's consumption is right, manager told.
+
+const dialogClass = "h-[calc(100dvh-0.75rem)] max-h-[calc(100dvh-0.75rem)] w-[calc(100vw-0.75rem)] max-w-[calc(100vw-0.75rem)] overflow-y-auto p-4 sm:h-auto sm:max-h-[90vh] sm:max-w-lg sm:p-6";
+
+function StoreTakeBackDialog({ requisition, open, onOpenChange }: { requisition: any; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const fullyIssued = requisition.status === "issued";
+  const { data: items } = useReturnableItems(open && fullyIssued ? requisition.id : undefined);
+  const [qty, setQty] = useState<Record<string, string>>({});
+  const [reason, setReason] = useState("");
+  const send = useStoreTakeBack();
+
+  // A partly issued order is not listed by returnable_items; the server still
+  // caps every line at what was issued less what already came back.
+  const lines: any[] = fullyIssued
+    ? (items || []).filter((i: any) => Number(i.can_return) > 0)
+    : Object.values((requisition.requisition_items || [])
+        .filter((l: any) => Number(l.issued_qty || 0) > 0)
+        .reduce((acc: Record<string, any>, l: any) => {
+          const prev = acc[l.ingredient_id];
+          const issued = (prev?.issued || 0) + Number(l.issued_qty || 0);
+          acc[l.ingredient_id] = {
+            ingredient_id: l.ingredient_id, name: l.ingredients?.name || "—",
+            unit: l.unit || l.ingredients?.unit || "", issued, already_returned: 0, can_return: issued,
+          };
+          return acc;
+        }, {}));
+  const chosen = lines.map((i: any) => ({ ...i, q: Number(qty[i.ingredient_id]) || 0 })).filter((i: any) => i.q > 0);
+
+  const submit = async () => {
+    const tooMuch = chosen.find((i: any) => i.q > Number(i.can_return) + 1e-9);
+    if (tooMuch) { toast.error(`${tooMuch.name}: zyada se zyada ${tooMuch.can_return} ${tooMuch.unit} wapas ho sakta hai`); return; }
+    if (!chosen.length) { toast.error("Kitna wapas aaya wo bharo"); return; }
+    try {
+      const res = await send.mutateAsync({
+        requisition_id: requisition.id,
+        items: chosen.map((i: any) => ({ ingredient_id: i.ingredient_id, qty: i.q })),
+        reason: reason || undefined,
+      });
+      toast.success(`${res?.returned_lines || chosen.length} item wapas stock mein chadh gaye`);
+      onOpenChange(false); setQty({}); setReason("");
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={dialogClass}>
+        <DialogHeader><DialogTitle>Kitchen se bacha saman wapas liya · REQ-{requisition.req_no}</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Jo saman kitchen ne wapas diya uski quantity bharo. Save karte hi stock mein wapas chadh jayega.
+        </p>
+        {lines.length === 0 ? (
+          <p className="py-4 text-sm text-muted-foreground">Is order mein ab kuch wapas lene ke liye nahi bacha.</p>
+        ) : (
+          <div className="space-y-2">
+            {lines.map((i: any) => (
+              <div key={i.ingredient_id} className="rounded-lg border p-3">
+                <p className="truncate text-base font-semibold">{i.name}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Diya: {i.issued} {i.unit}
+                  {Number(i.already_returned) > 0 && ` · Pehle wapas: ${i.already_returned} ${i.unit}`}
+                </p>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <Label className="text-sm">Wapas kitna aaya?</Label>
+                  <div className="flex items-center gap-2">
+                    <Input type="number" min={0} max={Number(i.can_return)} step="any" placeholder="0"
+                      className="h-11 w-28 text-right text-base" value={qty[i.ingredient_id] || ""}
+                      onChange={(e) => setQty((p) => ({ ...p, [i.ingredient_id]: e.target.value }))} />
+                    <span className="w-12 text-sm">{i.unit}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <VoiceReasonInput value={reason} onChange={setReason}
+              label="Kyun bacha? (optional)" placeholder="Jaise: log kam aaye" />
+          </div>
+        )}
+        <DialogFooter className="gap-2">
+          <Button className="h-11" variant="outline" onClick={() => onOpenChange(false)}>Band karo</Button>
+          <Button className="h-11" onClick={submit} disabled={send.isPending || chosen.length === 0}>
+            {send.isPending ? "Save ho raha hai…" : "Stock mein wapas chadhao"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function StoreExtraDialog({ requisition, open, onOpenChange }: { requisition: any; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const { data: ingredients } = useIngredients(open ? requisition.canteen_id : undefined);
+  const [search, setSearch] = useState("");
+  const [qty, setQty] = useState<Record<string, string>>({});
+  const [reason, setReason] = useState("");
+  const send = useIssueExtraToKitchen();
+
+  const onOrder = new Set((requisition.requisition_items || []).map((l: any) => l.ingredient_id));
+  const all = (ingredients || []) as any[];
+  const byId = new Map(all.map((i) => [i.id, i]));
+  const term = search.trim().toLowerCase();
+  const shown = all
+    .filter((i) => qty[i.id] !== undefined || (term ? String(i.name).toLowerCase().includes(term) : onOrder.has(i.id)))
+    .slice(0, 40);
+  const chosen = Object.entries(qty)
+    .map(([id, v]) => ({ id, q: Number(v) || 0, ing: byId.get(id) }))
+    .filter((c) => c.q > 0 && c.ing);
+
+  const submit = async () => {
+    if (!chosen.length) { toast.error("Kam se kam ek item ki quantity bharo"); return; }
+    const over = chosen.find((c) => c.q > Number(c.ing.current_stock || 0) + 1e-9);
+    if (over) { toast.error(`${over.ing.name} stock mein sirf ${over.ing.current_stock} ${over.ing.unit || ""} hai`); return; }
+    if (reason.trim().length < 3) { toast.error("Extra saman kyun diya, wo reason likho"); return; }
+    try {
+      const res = await send.mutateAsync({
+        requisition_id: requisition.id,
+        items: chosen.map((c) => ({ ingredient_id: c.id, qty: c.q })),
+        reason: reason.trim(),
+      });
+      toast.success(`Extra saman darj · ₹${Math.round(Number(res?.fifo_value || 0)).toLocaleString("en-IN")}`);
+      onOpenChange(false); setQty({}); setReason(""); setSearch("");
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={dialogClass}>
+        <DialogHeader><DialogTitle>Kitchen ko extra saman diya · REQ-{requisition.req_no}</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Order se zyada jo saman kitchen ko diya wo yahan bharo. Stock se turant ghatega, isi order ke
+          khane mein judega, aur Manager ko message jayega.
+        </p>
+        <Input className="h-11" placeholder="Item dhundho (order ke item neeche hain)…" value={search}
+          onChange={(e) => setSearch(e.target.value)} />
+        <div className="space-y-2">
+          {shown.length === 0 && <p className="py-2 text-sm text-muted-foreground">Koi item nahi mila.</p>}
+          {shown.map((i) => (
+            <div key={i.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold">{i.name}</p>
+                <p className="text-xs text-muted-foreground">Stock: {Number(i.current_stock || 0)} {i.unit || ""}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input type="number" min={0} step="any" placeholder="0" className="h-11 w-24 text-right text-base"
+                  value={qty[i.id] || ""}
+                  onChange={(e) => setQty((p) => ({ ...p, [i.id]: e.target.value }))} />
+                <span className="w-10 text-sm">{i.unit}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <VoiceReasonInput value={reason} onChange={setReason}
+          label="Extra kyun diya? (zaroori)" placeholder="Jaise: log zyada aaye, dal kam padi" />
+        <DialogFooter className="gap-2">
+          <Button className="h-11" variant="outline" onClick={() => onOpenChange(false)}>Band karo</Button>
+          <Button className="h-11" onClick={submit} disabled={send.isPending || chosen.length === 0}>
+            {send.isPending ? "Save ho raha hai…" : `Extra darj karo${chosen.length ? ` (${chosen.length})` : ""}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function StoreKitchenActions({ requisition }: { requisition: any }) {
+  const { canIssueStock, isChef } = useAuth();
+  const [backOpen, setBackOpen] = useState(false);
+  const [extraOpen, setExtraOpen] = useState(false);
+  const hasIssued = (requisition.requisition_items || []).some((l: any) => Number(l.issued_qty || 0) > 0);
+  if (!canIssueStock || isChef || !["approved", "issued"].includes(requisition.status) || !hasIssued) return null;
+  return (
+    <>
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <Button variant="outline" className="h-11 text-sm" onClick={() => setBackOpen(true)}>
+          <Undo2 className="mr-2 h-4 w-4" /> Bacha saman wapas liya
+        </Button>
+        <Button variant="outline" className="h-11 text-sm" onClick={() => setExtraOpen(true)}>
+          <PackagePlus className="mr-2 h-4 w-4" /> Extra saman diya
+        </Button>
+      </div>
+      {backOpen && <StoreTakeBackDialog requisition={requisition} open={backOpen} onOpenChange={setBackOpen} />}
+      {extraOpen && <StoreExtraDialog requisition={requisition} open={extraOpen} onOpenChange={setExtraOpen} />}
+    </>
   );
 }

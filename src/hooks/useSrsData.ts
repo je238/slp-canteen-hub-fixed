@@ -1569,6 +1569,45 @@ export function useAcceptReturn() {
   });
 }
 
+// The store's own entries: what the kitchen handed back (goes straight on
+// the shelf, the store keeper is the one receiving it) and what extra the
+// store handed over on top of an order (booked on that order, manager told).
+const invalidateKitchenMoves = (qc: ReturnType<typeof useQueryClient>) => {
+  for (const key of ["kitchenReturns", "ingredients", "stockLedger", "returnable", "requisitions",
+    "availability", "todayIssueDetails", "storeKeeperDashboard", "managerDashboard",
+    "periodSummary", "consumptionReport"]) {
+    qc.invalidateQueries({ queryKey: [key] });
+  }
+};
+
+export function useStoreTakeBack() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { requisition_id: string; items: { ingredient_id: string; qty: number }[]; reason?: string }) => {
+      const { data, error } = await supabase.rpc("store_take_back_from_kitchen" as any, {
+        p_requisition_id: args.requisition_id, p_items: args.items, p_reason: args.reason ?? null,
+      });
+      if (error) throw error;
+      return data as any;
+    },
+    onSuccess: () => invalidateKitchenMoves(qc),
+  });
+}
+
+export function useIssueExtraToKitchen() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { requisition_id: string; items: { ingredient_id: string; qty: number }[]; reason: string }) => {
+      const { data, error } = await supabase.rpc("issue_extra_to_kitchen" as any, {
+        p_requisition_id: args.requisition_id, p_items: args.items, p_reason: args.reason,
+      });
+      if (error) throw error;
+      return data as any;
+    },
+    onSuccess: () => invalidateKitchenMoves(qc),
+  });
+}
+
 // ---------------- Two names for one thing ----------------
 // Stock is matched to an item by its exact name, so a bill read as "Rose"
 // when it meant "Rice" opens a second item and the stock for one ingredient
