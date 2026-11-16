@@ -100,9 +100,9 @@ export default function PlanningWindow({
           Green = menu and headcount both in · amber = dishes entered but the
           headcount is still missing, so it cannot be published · grey = empty.
           The headcount is typed per day on purpose — it is what the day is
-          billed on. Only tomorrow's menu can be sent to the chef — the rest
-          stay drafts until their turn, and the chef's order is still approved
-          one day at a time.
+          billed on. Menus up to 7 days ahead can be sent to the chef — further
+          days stay drafts until then, and the chef's order is still raised and
+          approved one day at a time.
         </p>
       </CardContent>
     </Card>

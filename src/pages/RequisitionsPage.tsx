@@ -78,7 +78,10 @@ export default function RequisitionsPage() {
   // does not put that food back — it only guarantees the shelf and the book
   // never agree again. The late entry is allowed, it is labelled as late, and
   // it still goes to the manager and then the store like any other.
-  const { data: menus } = useMenuPlans(selectedCanteen, yesterdayIst(), tomorrowIst());
+  // Up to a week ahead too (16 Nov): the HS publishes the week, so the chef
+  // can raise orders early. They wait as pending; the manager can approve an
+  // order only from the day before it is cooked (checked in the database).
+  const { data: menus } = useMenuPlans(selectedCanteen, yesterdayIst(), shiftIst(todayIst(), 7));
   const { data: availability } = useAvailability(selectedCanteen);
   const [muted, setMutedState] = useState(isMuted());
   const createReq = useCreateRequisition();
@@ -221,6 +224,11 @@ export default function RequisitionsPage() {
   const headChefStage = allPending.filter(waitingOnHeadChef);
   const pending = (isHeadChef || isChef) ? allPending : allPending.filter((r: any) => !waitingOnHeadChef(r));
   const mealDayPassed = (r: any) => !!r.menu_plans?.menu_date && r.menu_plans.menu_date < todayIst();
+  // An advance order: its day is further out than tomorrow, so it cannot be approved yet.
+  const approveFrom = (r: any): string | null => {
+    const d = r.menu_plans?.menu_date;
+    return d && d > tomorrowIst() ? shiftIst(d, -1) : null;
+  };
   const approvedRaw = list.filter((r: any) => r.status === "approved");
   const done = list.filter((r: any) => ["issued", "rejected", "cancelled"].includes(r.status));
 
@@ -1227,7 +1235,12 @@ export default function RequisitionsPage() {
                       </div>
                     )
                   ) : isManagerOrAbove ? (
-                    <div className="flex flex-wrap justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {approveFrom(r) && (
+                        <Badge variant="outline" className="border-accent/40 text-accent">
+                          Advance order · {fmtDate(approveFrom(r))} ko approve hoga
+                        </Badge>
+                      )}
                       <Button size="sm" variant="outline" className="text-destructive"
                               onClick={() => cancelWholeOrder(r)} disabled={cancelReq.isPending}>
                         <Trash2 className="mr-1.5 h-4 w-4" /> Order cancel
@@ -1686,7 +1699,12 @@ export default function RequisitionsPage() {
                   <SelectItem value="none">Not linked</SelectItem>
                   {(menus || [])
                     .filter((m: any) => m.status === "published")
-                    .sort((a: any, b: any) => String(b.menu_date).localeCompare(String(a.menu_date)))
+                    // Tomorrow first (the usual order), then today, then the
+                    // days after tomorrow in order, and a missed day last.
+                    .sort((a: any, b: any) => {
+                      const rank = (d: string) => d === tomorrowIst() ? 0 : d === todayIst() ? 1 : d > tomorrowIst() ? 2 : 3;
+                      return rank(a.menu_date) - rank(b.menu_date) || String(a.menu_date).localeCompare(String(b.menu_date));
+                    })
                     .map((m: any) => (
                     <SelectItem key={m.id} value={m.id}>
                       {m.menu_date === tomorrowIst() ? "Tomorrow"
@@ -1699,6 +1717,9 @@ export default function RequisitionsPage() {
                       {m.menu_date < todayIst() && (
                         <span className="ml-1.5 text-warning font-medium">· late entry</span>
                       )}
+                      {m.menu_date > tomorrowIst() && (
+                        <span className="ml-1.5 text-accent font-medium">· advance</span>
+                      )}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1709,6 +1730,12 @@ export default function RequisitionsPage() {
               shelf whether or not anyone wrote it down — but it is never
               silent, because a backdated order is exactly the shape a covered
               theft would take. The date it lands on is said out loud. */}
+          {pickedMenu && pickedMenu.menu_date > tomorrowIst() && (
+            <p className="rounded-md border border-accent/30 bg-accent/5 p-2 text-xs">
+              Advance order: abhi bhej sakte ho, Manager ise {fmtDate(shiftIst(pickedMenu.menu_date, -1))} ko
+              (khane se ek din pehle) approve karega. Tab tak isme badlav ho sakta hai.
+            </p>
+          )}
           {pickedMenu && pickedMenu.menu_date < todayIst() && (
             <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
               <p className="text-xs font-semibold">

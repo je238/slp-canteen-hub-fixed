@@ -254,8 +254,8 @@ export default function MenuPlanningPage() {
               <p className="text-xs flex-1 min-w-[240px]">
                 <b>Tomorrow ({due![0].menu_date.split("-").reverse().join("/")})</b> —{" "}
                 {due!.filter((d: any) => d.status === "published").length} of {due!.length} meals
-                sent to the chef. Add each meal's headcount and publish it; only
-                tomorrow can be sent.
+                sent to the chef. Add each meal's headcount and publish it; menus up to
+                7 days ahead can be sent.
               </p>
               <Button size="sm" variant="outline" className="h-7 text-[11px]"
                 onClick={() => setDate(due![0].menu_date)}>
