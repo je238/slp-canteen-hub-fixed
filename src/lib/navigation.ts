@@ -65,6 +65,9 @@ export const NAV: NavEntry[] = [
   // Kitchen. Menu & Production and Requisitions stay on the owner's menu:
   // that is where a plate count or an approved quantity gets corrected, and
   // only an admin may correct them.
+  // A Unit Supervisor's whole job: their unit's plates and wastage.
+  { path: "/unit-entry", label: "Meri Unit", icon: ClipboardCheck, roles: ["unit_supervisor"] },
+
   { path: "/menu-planning", label: "Menu & Production", icon: CalendarDays,
     roles: ["head_supervisor", ...APPROVAL_MANAGERS, ...ADMIN_UP] },
   { path: "/requisitions", label: "Requisitions", icon: ClipboardList,
@@ -128,6 +131,7 @@ export function homeFor(role?: string | null): string {
   const r = norm(role);
   if (r === "vendor") return "/vendor-portal";
   if (r === "head_supervisor") return "/menu-planning";
+  if (r === "unit_supervisor") return "/unit-entry";
   if (r === "head_chef") return "/requisitions";
   if (["chef", "cashier", "unit_manager", "manager"].includes(r)) return "/requisitions";
   const allowed = navFor(r);

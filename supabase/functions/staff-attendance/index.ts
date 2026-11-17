@@ -5,6 +5,9 @@
 // token that only this function accepts. Location and time are checked in
 // the database (staff_attendance_punch); the selfie goes to the private
 // "attendance" bucket, which only managers can read.
+//
+// A Unit Supervisor has an app login already; their staff row is linked to
+// it (staff.user_id), so they punch with that login instead of mobile + PIN.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -75,10 +78,26 @@ Deno.serve(async (req) => {
       return json({ token, me: await status(data.staff_id) });
     }
 
-    const who = await readToken(body.token);
-    if (!who) return json({ error: "Dobara login karo", relogin: true }, 401);
-    const me = await status(who.staffId);
-    if (!me || !me.active || Number(me.pin_ver) !== who.pinVer) {
+    let who: { staffId: string } | null = null;
+    let me: Record<string, any> | null = null;
+    if (body.token) {
+      const t = await readToken(body.token);
+      if (!t) return json({ error: "Dobara login karo", relogin: true }, 401);
+      me = await status(t.staffId);
+      if (!me || !me.active || Number(me.pin_ver) !== t.pinVer) {
+        return json({ error: "Dobara login karo", relogin: true }, 401);
+      }
+      who = { staffId: t.staffId };
+    } else if (body.session) {
+      // App login (Unit Supervisor): the user's own access token.
+      const { data: u } = await db.auth.getUser(String(body.session));
+      if (!u?.user) return json({ error: "App mein dobara login karo", relogin: true }, 401);
+      const { data: row } = await db.from("staff").select("id").eq("user_id", u.user.id).eq("active", true).maybeSingle();
+      if (!row) return json({ error: "Aapka naam staff list mein nahi juda hai. Manager ko bolo.", nostaff: true }, 404);
+      me = await status(row.id);
+      if (!me) return json({ error: "Aapka naam staff list mein nahi juda hai. Manager ko bolo.", nostaff: true }, 404);
+      who = { staffId: row.id };
+    } else {
       return json({ error: "Dobara login karo", relogin: true }, 401);
     }
 

@@ -22,10 +22,11 @@ const ROLES = [
   { value: "head_chef", label: "Head Chef", desc: "Requisition ka full item aur quantity review", site: true },
   { value: "chef", label: "Chef", desc: "Production, recipe and requisition", site: true },
   { value: "store_keeper", label: "Store Keeper", desc: "Purchase, inventory and issue", site: true },
+  { value: "unit_supervisor", label: "Unit Supervisor", desc: "Apni unit ki plates, wastage aur apni attendance", site: true, unit: true },
   { value: "vendor", label: "Vendor", desc: "Own invoices and bills", site: false, supplier: true },
 ];
 const roleName = (role: string) => ROLES.find((r) => r.value === role)?.label || role.replace(/_/g, " ");
-const freshForm = () => ({ email: "", password: "", role: "store_keeper", canteen_id: "", supplier_id: "", user_id: "" });
+const freshForm = () => ({ email: "", password: "", role: "store_keeper", canteen_id: "", supplier_id: "", user_id: "", unit_no: "", full_name: "" });
 const makePassword = () => `Slp@${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}A9`;
 
 export default function UserManagementPage() {
@@ -57,6 +58,7 @@ export default function UserManagementPage() {
       if (editing && form.password && form.password.length < 8) throw new Error("New password minimum 8 characters ka ho");
       if (spec?.site && !form.canteen_id) throw new Error("Is role ke liye site select karein");
       if (spec?.supplier && !form.supplier_id) throw new Error("Vendor company select karein");
+      if ((spec as any)?.unit && !form.unit_no) throw new Error("Unit select karein (1, 2 ya 3)");
       const { data, error } = await supabase.functions.invoke("admin-create-user", {
         method: editing ? "PATCH" : "POST",
         body: form,
@@ -149,8 +151,12 @@ export default function UserManagementPage() {
           <div className="space-y-4">
             <div><Label>Email</Label><Input type="email" value={form.email} disabled={editing} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
             <div><div className="flex items-center justify-between"><Label>{editing ? "New password (optional)" : "Temporary password"}</Label><Button type="button" variant="ghost" size="sm" onClick={() => setForm({ ...form, password: makePassword() })}><KeyRound className="mr-1 h-3.5 w-3.5" />Generate</Button></div><Input type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
-            <div><Label>Role</Label><Select value={form.role} onValueChange={(role) => setForm({ ...form, role, canteen_id: "", supplier_id: "" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ROLES.filter((r) => rank > (({ admin: 60, ops_manager: 50, unit_manager: 40, head_supervisor: 38, head_chef: 35, chef: 30, store_keeper: 20, vendor: 10 } as any)[r.value])).map((r) => <SelectItem key={r.value} value={r.value}><span className="font-medium">{r.label}</span> — {r.desc}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label>Role</Label><Select value={form.role} onValueChange={(role) => setForm({ ...form, role, canteen_id: "", supplier_id: "" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{ROLES.filter((r) => rank > (({ admin: 60, ops_manager: 50, unit_manager: 40, head_supervisor: 38, head_chef: 35, chef: 30, store_keeper: 20, unit_supervisor: 15, vendor: 10 } as any)[r.value])).map((r) => <SelectItem key={r.value} value={r.value}><span className="font-medium">{r.label}</span> — {r.desc}</SelectItem>)}</SelectContent></Select></div>
             {spec?.site && <div><Label>Assigned site</Label><Select value={form.canteen_id || ""} onValueChange={(canteen_id) => setForm({ ...form, canteen_id })}><SelectTrigger><SelectValue placeholder="Site choose karein" /></SelectTrigger><SelectContent>{(canteens as any[]).filter((c) => form.role !== "head_chef" || c.head_chef_review !== false).map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select>{form.role === "head_chef" && (canteens as any[]).some((c) => c.head_chef_review === false) && <p className="mt-1 text-[11px] text-muted-foreground">Sun Pharma par Head Chef nahi hota — wahan order Chef se seedha Manager ke paas jaata hai.</p>}</div>}
+            {(spec as any)?.unit && <div className="grid grid-cols-2 gap-2">
+              <div><Label>Unit</Label><Select value={String(form.unit_no || "")} onValueChange={(unit_no) => setForm({ ...form, unit_no })}><SelectTrigger><SelectValue placeholder="Unit" /></SelectTrigger><SelectContent>{["1", "2", "3"].map((u) => <SelectItem key={u} value={u}>Unit {u}</SelectItem>)}</SelectContent></Select></div>
+              {!editing && <div><Label>Naam</Label><Input value={form.full_name || ""} onChange={(e) => setForm({ ...form, full_name: e.target.value })} placeholder="Supervisor ka naam" /></div>}
+            </div>}
             {spec?.supplier && <div><Label>Vendor company</Label><Select value={form.supplier_id || ""} onValueChange={(supplier_id) => setForm({ ...form, supplier_id })}><SelectTrigger><SelectValue placeholder="Supplier choose karein" /></SelectTrigger><SelectContent>{(suppliers as any[]).map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent></Select></div>}
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : editing ? "Save changes" : "Create login"}</Button></DialogFooter>

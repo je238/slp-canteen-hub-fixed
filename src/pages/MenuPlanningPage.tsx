@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import AppLayout from "@/components/AppLayout";
+import { supabase } from "@/integrations/supabase/client";
 import { useAppContext } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMenuPlans, useSaveMenuPlan, useUpdateMenuPlanItem, useRecordMealCounts, useUncountedMeals, useDueToPublish, MEAL_PERIODS } from "@/hooks/useSrsData";
@@ -144,13 +145,23 @@ export default function MenuPlanningPage() {
           unit: d.unit || null,
         })),
       });
-      toast.success(publish ? "Menu published — the chef can see it now" : "Menu saved as draft");
+      // A menu already with the chef was changed: tell the chef.
+      if (editor.id && editor.status === "published") {
+        await supabase.rpc("notify_menu_changed" as any, { p_menu_plan_id: editor.id });
+        toast.success("Menu badal gaya — Chef ko bata diya");
+      } else {
+        toast.success(publish ? "Menu published — the chef can see it now" : "Menu saved as draft");
+      }
       closeEditor();
     } catch (e: any) {
       if (e?.code === "MENU_ALREADY_EXISTS") {
         closeEditor();
         await qc.invalidateQueries({ queryKey: ["menuPlans"] });
         toast.info(e.message);
+        return;
+      }
+      if (/row-level security/i.test(e?.message || "") && editor?.status === "published") {
+        toast.error("Is menu ka order approve / issue ho chuka hai (ya din nikal gaya) — ab Manager badlega");
         return;
       }
       toast.error(e.message);
@@ -469,9 +480,11 @@ export default function MenuPlanningPage() {
                       </div>
                       )
                     )}
-                    {!isPast && ((isHeadSupervisor && (!plan || plan.status === "draft")) || isManagerOrAbove) && (
+                    {/* The HS may change a published menu too while no order
+                        against it is approved (the database checks that). */}
+                    {!isPast && (isHeadSupervisor || isManagerOrAbove) && (
                       <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => openEditor(mp.value)}>
-                        {plan ? (plan.status === "published" ? "Manager correction" : "Edit menu") : "Plan this meal"}
+                        {plan ? (plan.status === "published" ? (isHeadSupervisor ? "Menu badlo" : "Manager correction") : "Edit menu") : "Plan this meal"}
                       </Button>
                     )}
                   </CardContent>

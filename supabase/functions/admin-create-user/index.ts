@@ -7,11 +7,11 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
 };
 const rank: Record<string, number> = {
-  vendor: 10, store_keeper: 20, chef: 30, cashier: 30, head_chef: 35, head_supervisor: 38, unit_manager: 40,
+  vendor: 10, unit_supervisor: 15, store_keeper: 20, chef: 30, cashier: 30, head_chef: 35, head_supervisor: 38, unit_manager: 40,
   manager: 40, ops_manager: 50, admin: 60, super_admin: 70, owner: 70,
 };
-const allowedRoles = ["admin", "ops_manager", "unit_manager", "head_supervisor", "head_chef", "chef", "store_keeper", "vendor"];
-const siteRoles = new Set(["ops_manager", "unit_manager", "head_supervisor", "head_chef", "chef", "store_keeper"]);
+const allowedRoles = ["admin", "ops_manager", "unit_manager", "head_supervisor", "head_chef", "chef", "store_keeper", "unit_supervisor", "vendor"];
+const siteRoles = new Set(["ops_manager", "unit_manager", "head_supervisor", "head_chef", "chef", "store_keeper", "unit_supervisor"]);
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
@@ -32,7 +32,7 @@ Deno.serve(async (req: Request) => {
       const { data: authPage, error: listError } = await service.auth.admin.listUsers({ perPage: 1000 });
       if (listError) throw listError;
       const { data: roles, error: rolesError } = await service.from("user_roles")
-        .select("id,user_id,role,canteen_id,supplier_id,created_at").order("created_at", { ascending: false });
+        .select("id,user_id,role,canteen_id,supplier_id,unit_no,created_at").order("created_at", { ascending: false });
       if (rolesError) throw rolesError;
       const authById = new Map(authPage.users.map((u) => [u.id, u]));
       return json({ users: (roles || []).map((r) => {
@@ -48,6 +48,7 @@ Deno.serve(async (req: Request) => {
       if ((rank[targetRole] || 0) >= callerRank) return "You cannot assign a role equal to or above your own";
       if (siteRoles.has(targetRole) && !body.canteen_id) return "Select a site for this role";
       if (targetRole === "vendor" && !body.supplier_id) return "Select a supplier for the vendor";
+      if (targetRole === "unit_supervisor" && ![1, 2, 3].includes(Number(body.unit_no))) return "Select the unit (1, 2 or 3)";
       return null;
     };
 
@@ -63,10 +64,20 @@ Deno.serve(async (req: Request) => {
         user_id: created.user.id, role: targetRole,
         canteen_id: siteRoles.has(targetRole) ? body.canteen_id : null,
         supplier_id: targetRole === "vendor" ? body.supplier_id : null,
+        unit_no: targetRole === "unit_supervisor" ? Number(body.unit_no) : null,
       });
       if (roleError) {
         await service.auth.admin.deleteUser(created.user.id);
         return json({ error: roleError.message }, 400);
+      }
+      // A Unit Supervisor marks attendance with this login: give them a staff row.
+      if (targetRole === "unit_supervisor") {
+        const name = String(body.full_name || "").trim() || `Unit ${body.unit_no} Supervisor`;
+        if (body.full_name) await service.auth.admin.updateUserById(created.user.id, { user_metadata: { full_name: name } });
+        await service.from("staff").insert({
+          canteen_id: body.canteen_id, user_id: created.user.id, name,
+          role: `Unit ${body.unit_no} Supervisor`, email, active: true,
+        });
       }
       return json({ user_id: created.user.id, email });
     }
@@ -89,6 +100,7 @@ Deno.serve(async (req: Request) => {
       const { error } = await service.from("user_roles").update({
         role: targetRole, canteen_id: siteRoles.has(targetRole) ? body.canteen_id : null,
         supplier_id: targetRole === "vendor" ? body.supplier_id : null,
+        unit_no: targetRole === "unit_supervisor" ? Number(body.unit_no) : null,
       }).eq("user_id", targetId);
       if (error) return json({ error: error.message }, 400);
       return json({ ok: true });

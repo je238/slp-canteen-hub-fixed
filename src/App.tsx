@@ -36,6 +36,7 @@ import CentralKitchenPage from "./pages/CentralKitchenPage";
 import MealProfitPage from "./pages/MealProfitPage";
 import StaffAttendancePage from "./pages/StaffAttendancePage";
 import AttendancePage from "./pages/AttendancePage";
+import UnitEntryPage from "./pages/UnitEntryPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -86,7 +87,10 @@ const App = () => (
                 <Route path="/menu-planning" element={
                   <ProtectedRoute minRole="chef"><MenuPlanningPage /></ProtectedRoute>
                 } />
-                <Route path="/menu-scan" element={
+                <Route path="/unit-entry" element={
+            <ProtectedRoute><UnitEntryPage /></ProtectedRoute>
+          } />
+          <Route path="/menu-scan" element={
                   <ProtectedRoute minRole="head_supervisor"><MenuScanPage /></ProtectedRoute>
                 } />
                 <Route path="/requisitions" element={

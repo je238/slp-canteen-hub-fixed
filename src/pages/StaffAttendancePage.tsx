@@ -4,10 +4,13 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { LogIn, LogOut, MapPin, Camera, Clock, CheckCircle2, AlertTriangle } from "lucide-react";
 import { toCompressedBase64 } from "@/lib/image";
+import { supabase } from "@/integrations/supabase/client";
 
 // The staff member's own phone. No app account: mobile + PIN gives a token
 // that only the staff-attendance function accepts. "Aaya" / "Gaya" takes a
 // selfie and the phone's GPS; the server decides if they are at the canteen.
+// Someone with an app login (a Unit Supervisor) is recognised by that login
+// instead, with no PIN.
 
 const FN = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/staff-attendance`;
 const KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -37,18 +40,35 @@ const fmt12 = (hhmm?: string | null) => {
 };
 const mins = (n: number) => n >= 60 ? `${Math.floor(n / 60)} ghante ${n % 60} min` : `${n} min`;
 
-function getLocation(): Promise<GeolocationPosition> {
+// Attendance counts only inside the canteen, so the reading must be sharp.
+// The first GPS fix is often 50-100 m off; keep listening for up to 15 s and
+// use the best one, stopping early once it is within 15 m.
+export function getBestLocation(goodEnoughM = 15, maxWaitMs = 15000): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) { reject(new Error("Is phone mein location nahi hai")); return; }
-    navigator.geolocation.getCurrentPosition(resolve, (e) => reject(new Error(
-      e.code === 1 ? "Location ki permission do (browser settings → Location → Allow)"
-        : "Location nahi mili. GPS on karke dobara try karo")),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+    let best: GeolocationPosition | null = null;
+    let done = false;
+    const finish = (err?: Error) => {
+      if (done) return; done = true;
+      navigator.geolocation.clearWatch(id); clearTimeout(timer);
+      if (best) resolve(best); else reject(err || new Error("Location nahi mili. GPS on karke dobara try karo"));
+    };
+    const id = navigator.geolocation.watchPosition((pos) => {
+      if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
+      if (pos.coords.accuracy <= goodEnoughM) finish();
+    }, (e) => {
+      if (e.code === 1) finish(new Error("Location ki permission do (browser settings → Location → Allow)"));
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: maxWaitMs });
+    const timer = setTimeout(() => finish(), maxWaitMs);
   });
 }
+const getLocation = () => getBestLocation();
 
 export default function StaffAttendancePage() {
   const [token, setToken] = useState(readToken);
+  // App login, when there is no PIN sign-in on this phone.
+  const [session, setSession] = useState("");
+  const auth = token ? { token } : session ? { session } : null;
   const [me, setMe] = useState<any>(null);
   const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");
@@ -62,12 +82,19 @@ export default function StaffAttendancePage() {
   useEffect(() => { document.title = "Staff Attendance"; }, []);
 
   useEffect(() => {
-    if (!token) return;
-    call({ action: "status", token }).then((d) => setMe(d.me)).catch((e) => {
-      if (e.relogin) { saveToken(""); setToken(""); }
+    if (token) return;
+    supabase.auth.getSession().then(({ data }) => setSession(data.session?.access_token || ""));
+  }, [token]);
+
+  useEffect(() => {
+    if (!auth) return;
+    call({ action: "status", ...auth }).then((d) => setMe(d.me)).catch((e) => {
+      if (e.relogin && token) { saveToken(""); setToken(""); }
+      if (session && !token) setSession("");   // not linked to staff: fall back to PIN sign-in
       setError(e.message);
     });
-  }, [token]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, session]);
 
   const login = async () => {
     setError(""); setBusy("login");
@@ -97,7 +124,7 @@ export default function StaffAttendancePage() {
       const pos = await (locRef.current || getLocation());
       const { base64, mimeType } = await toCompressedBase64(file, 900);
       const d = await call({
-        action: "punch", token, kind,
+        action: "punch", ...auth, kind,
         lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy,
         photo: `data:${mimeType};base64,${base64}`,
       });
@@ -107,7 +134,7 @@ export default function StaffAttendancePage() {
         ? `Attendance lag gayi: ${timeOf(r.at)}${r.late_min > 0 ? ` · ${mins(r.late_min)} late` : " · Time par"}`
         : `Chhutti darj: ${timeOf(r.at)} · Kaam: ${mins(r.worked_min)}${r.early_min > 0 ? ` · ${mins(r.early_min)} pehle gaye` : ""}`);
     } catch (e: any) {
-      if (e.relogin) { saveToken(""); setToken(""); setMe(null); }
+      if (e.relogin && token) { saveToken(""); setToken(""); setMe(null); }
       setError(e.message);
     }
     setBusy("");
@@ -142,7 +169,7 @@ export default function StaffAttendancePage() {
           </div>
         )}
 
-        {!token ? (
+        {!auth ? (
           <Card><CardContent className="space-y-3 p-4">
             <label className="block text-sm font-medium">Mobile number</label>
             <Input className="h-12 text-lg" inputMode="numeric" maxLength={10} placeholder="10 ank"
@@ -205,9 +232,13 @@ export default function StaffAttendancePage() {
             <p className="flex items-start gap-1 text-xs text-muted-foreground">
               <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               Button dabane par selfie khulegi <Camera className="mx-0.5 inline h-3.5 w-3.5" /> aur location li jayegi.
-              Attendance sirf canteen par hi lagegi.
+              Attendance sirf canteen ke andar hi lagegi. Location on rakho; bahar ya door se nahi lagegi.
             </p>
-            <Button variant="ghost" className="w-full text-xs" onClick={logout}>Is phone se logout</Button>
+            {token ? (
+              <Button variant="ghost" className="w-full text-xs" onClick={logout}>Is phone se logout</Button>
+            ) : (
+              <Button variant="ghost" className="w-full text-xs" onClick={() => { window.location.href = "/"; }}>App par wapas</Button>
+            )}
           </>
         )}
       </div>

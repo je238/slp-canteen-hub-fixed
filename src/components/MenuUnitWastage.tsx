@@ -11,8 +11,10 @@ import { useCanteens } from "@/hooks/useSupabaseData";
 const UNIT_NUMBERS = [1, 2, 3] as const;
 
 export default function MenuUnitWastage({
-  plan, item, canteenId, onSaved,
-}: { plan: any; item: any; canteenId: string; onSaved: () => void }) {
+  plan, item, canteenId, onSaved, onlyUnit,
+}: { plan: any; item: any; canteenId: string; onSaved: () => void;
+     /** A Unit Supervisor sees and records only their own unit. */
+     onlyUnit?: number }) {
   const [quantities, setQuantities] = useState<Record<number, string>>({});
   const [reasons, setReasons] = useState<Record<number, string>>({});
   const [busyUnit, setBusyUnit] = useState<number | null>(null);
@@ -78,11 +80,11 @@ export default function MenuUnitWastage({
   return (
     <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
       <div>
-        <p className="text-xs font-semibold">{item.dish_name} — Unit 1/2/3 wastage</p>
+        <p className="text-xs font-semibold">{item.dish_name} — {onlyUnit ? `Unit ${onlyUnit}` : "Unit 1/2/3"} wastage</p>
         <p className="text-[11px] text-muted-foreground">Is item ka har unit ka weight aur photo alag save hoga.</p>
       </div>
 
-      {UNIT_NUMBERS.map((unitNo) => {
+      {UNIT_NUMBERS.filter((u) => !onlyUnit || u === onlyUnit).map((unitNo) => {
         const done = entries.find((row) => Number(row.unit_no) === unitNo);
         if (done) {
           return (

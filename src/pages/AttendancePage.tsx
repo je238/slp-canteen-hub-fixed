@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Camera, Copy, KeyRound, MapPin, Pencil, Plus, UserCheck } from "lucide-react";
 import { toast } from "sonner";
+import { getBestLocation } from "@/pages/StaffAttendancePage";
 
 // The manager's side of staff attendance: who came, when, from how far, with
 // the selfie; the staff list with shifts and PINs; and where the canteen is.
@@ -288,30 +289,30 @@ function StaffList({ canteenId, staff }: { canteenId: string; staff: any[] }) {
 
 function LocationSetup({ canteen }: { canteen: any }) {
   const qc = useQueryClient();
-  const [radius, setRadius] = useState(String(canteen?.att_radius_m ?? 150));
+  const [radius, setRadius] = useState(String(canteen?.att_radius_m ?? 50));
   const [busy, setBusy] = useState(false);
-  const setHere = () => {
-    if (!navigator.geolocation) { toast.error("Is device mein location nahi hai"); return; }
+  // The canteen's pin must be sharp: the staff circle is drawn around it.
+  const setHere = async () => {
     setBusy(true);
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      if (pos.coords.accuracy > 100) {
-        toast.error(`GPS abhi kamzor hai (${Math.round(pos.coords.accuracy)} m). Khuli jagah par dobara try karo.`);
-        setBusy(false); return;
+    try {
+      const pos = await getBestLocation(10, 20000);
+      if (pos.coords.accuracy > 30) {
+        toast.error(`Location abhi ${Math.round(pos.coords.accuracy)} m tak galat hai. Canteen ke beech mein, khidki ke paas 20 second ruk kar dobara dabao.`);
+        return;
       }
       const { error } = await sb.rpc("set_attendance_location", {
-        p_canteen_id: canteen.id, p_lat: pos.coords.latitude, p_lng: pos.coords.longitude, p_radius_m: Number(radius) || 150,
+        p_canteen_id: canteen.id, p_lat: pos.coords.latitude, p_lng: pos.coords.longitude, p_radius_m: Number(radius) || 50,
       });
-      setBusy(false);
       if (error) { toast.error(error.message); return; }
-      toast.success("Canteen ki location set ho gayi");
+      toast.success(`Canteen ki location set ho gayi (±${Math.round(pos.coords.accuracy)} m)`);
       qc.invalidateQueries({ queryKey: ["canteens"] });
-    }, (e) => { setBusy(false); toast.error(e.code === 1 ? "Location ki permission do" : "Location nahi mili"); },
-    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+    } catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
   };
   const saveRadius = async () => {
     if (canteen.att_lat == null) { setHere(); return; }
     const { error } = await sb.rpc("set_attendance_location", {
-      p_canteen_id: canteen.id, p_lat: canteen.att_lat, p_lng: canteen.att_lng, p_radius_m: Number(radius) || 150,
+      p_canteen_id: canteen.id, p_lat: canteen.att_lat, p_lng: canteen.att_lng, p_radius_m: Number(radius) || 50,
     });
     if (error) { toast.error(error.message); return; }
     toast.success("Daayra save ho gaya"); qc.invalidateQueries({ queryKey: ["canteens"] });
@@ -329,10 +330,12 @@ function LocationSetup({ canteen }: { canteen: any }) {
         <p className="font-semibold text-warning">Location abhi set nahi hai. Iske bina koi attendance nahi lagegi.</p>
       )}
       <p className="text-muted-foreground">
-        Canteen ke andar khade hokar ye button dabao. Staff ki attendance sirf is jagah ke aas-paas (daayre ke andar) hi lagegi.
+        Canteen ke <b>beech mein</b> khade hokar ye button dabao. Staff ki attendance sirf is jagah se daayre ke andar hi lagegi;
+        bahar se nahi. Daayra canteen ke size jitna rakho: chhoti canteen 25-40 m, badi 50-80 m.
+        Phone ki location deewar ke andar/bahar ka farak poori tarah nahi pakad sakti, isliye har attendance ke saath selfie bhi li jaati hai.
       </p>
       <div className="flex flex-wrap items-end gap-2">
-        <div><Label>Daayra (meter)</Label><Input type="number" min={30} max={2000} className="w-28" value={radius} onChange={(e) => setRadius(e.target.value)} /></div>
+        <div><Label>Daayra (meter)</Label><Input type="number" min={20} max={300} className="w-28" value={radius} onChange={(e) => setRadius(e.target.value)} /></div>
         <Button onClick={setHere} disabled={busy}><MapPin className="mr-1 h-4 w-4" /> {busy ? "Location le rahe hain…" : "Main canteen mein hoon, yahi set karo"}</Button>
         {canteen?.att_lat != null && <Button variant="outline" onClick={saveRadius}>Sirf daayra save karo</Button>}
       </div>
@@ -353,8 +356,8 @@ export default function AttendancePage() {
           <UserCheck className="mx-auto mb-2 h-6 w-6" /> Upar se ek site chuno.
         </CardContent></Card>
       ) : (
-        <Tabs defaultValue="day" className="space-y-3">
-          <TabsList className="flex-wrap">
+        <Tabs defaultValue={canteen.att_lat == null ? "location" : "day"} className="space-y-3">
+          <TabsList className="h-auto w-full flex-wrap justify-start">
             <TabsTrigger value="day">Roz ki attendance</TabsTrigger>
             <TabsTrigger value="month">Mahina</TabsTrigger>
             <TabsTrigger value="staff">Staff</TabsTrigger>
