@@ -488,36 +488,43 @@ serve(async (req) => {
       ? Array.isArray(c.menu)
       : Array.isArray(c.items) && c.items.length > 0;
 
-    // Claude starts at once and runs beside the Google chain below.
+    // Claude is the costly reader, so it is the backup: it starts only when
+    // Google has not answered in 25 s or has failed. Racing it on every bill
+    // paid for two reads of each bill (Nov 2026).
     const claudeKey = Deno.env.get("ANTHROPIC_API_KEY");
     let claudeError = "";
-    const claudeRead: Promise<Record<string, unknown>> = claudeKey
+    const readClaude = (): Promise<Record<string, unknown>> => claudeKey
       ? readWithClaude(
           claudeKey, (isMenu ? MENU_PROMPT : SYSTEM_PROMPT) + knownBlock,
           isMenu
             ? "Read this menu chart:"
             : "Read this invoice or handwritten Hindi cash memo. Extract every visible goods row, including handwritten Devanagari rows:",
-          imageBase64, mimeType, toJsonSchema(isMenu ? MENU_SCHEMA : RESPONSE_SCHEMA), 110_000,
+          imageBase64, mimeType, toJsonSchema(isMenu ? MENU_SCHEMA : RESPONSE_SCHEMA), 85_000,
         ).then((c) => {
           if (!usefulResult(c)) throw new Error("claude returned no invoice lines");
           return c;
+        }).catch((error) => {
+          claudeError = error instanceof Error ? error.message : String(error);
+          console.error("Claude read failed:", claudeError);
+          throw error;
         })
       : Promise.reject(new Error("ANTHROPIC_API_KEY not configured"));
-    claudeRead.catch((error) => {
-      claudeError = error instanceof Error ? error.message : String(error);
-      console.error("Claude read failed:", claudeError);
-    });
+
+    // A free-tier Google key (a project with no billing) is tried first;
+    // when its daily limit is used up or it fails, the paid key reads.
+    const freeKey = Deno.env.get("GEMINI_FREE_KEY")?.trim() || "";
 
     let sawRateLimit = false;
     let sawTransient = false;
     let lastError = "No OCR model succeeded";
 
     // One request to one Google model: its lines, or an error saying why not.
-    const askGemini = async (model: Model): Promise<Record<string, unknown>> => {
+    const askGemini = async (model: Model, key: string = geminiKey): Promise<Record<string, unknown>> => {
+      const via = key === freeKey ? " (free key)" : "";
       try {
         let response = await fetchWithTimeout(
           `https://generativelanguage.googleapis.com/v1beta/models/${model.name}:generateContent`,
-          { method: "POST", headers: { "x-goog-api-key": geminiKey, "Content-Type": "application/json" }, body: bodyFor(lowThinking) },
+          { method: "POST", headers: { "x-goog-api-key": key, "Content-Type": "application/json" }, body: bodyFor(lowThinking) },
           model.timeoutMs,
         );
         if (response.status === 400 && lowThinking) {
@@ -527,17 +534,17 @@ serve(async (req) => {
             lowThinking = false;   // same model again, plain request
             response = await fetchWithTimeout(
               `https://generativelanguage.googleapis.com/v1beta/models/${model.name}:generateContent`,
-              { method: "POST", headers: { "x-goog-api-key": geminiKey, "Content-Type": "application/json" }, body: bodyFor(false) },
+              { method: "POST", headers: { "x-goog-api-key": key, "Content-Type": "application/json" }, body: bodyFor(false) },
               model.timeoutMs,
             );
           }
         }
         if (!response.ok) {
           const detail = (await response.text()).slice(0, 300);
-          sawRateLimit ||= response.status === 429;
+          sawRateLimit ||= response.status === 429 && !via;   // the free key running out is expected
           sawTransient ||= isTransientStatus(response.status);
           if (response.status === 404) modelCache = null;   // retired: ask Google again next time
-          throw new Error(`${model.name} -> ${response.status}: ${detail}`);
+          throw new Error(`${model.name}${via} -> ${response.status}: ${detail}`);
         }
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
@@ -546,7 +553,7 @@ serve(async (req) => {
         // A model can return valid JSON while treating an informal handwritten
         // cash memo as having no lines. That is a miss, so another reader tries.
         if (!usefulResult(candidate)) { sawTransient = true; throw new Error(`${model.name} returned no invoice lines`); }
-        answeredBy ||= model.name;
+        answeredBy ||= model.name + via;
         return candidate;
       } catch (error) {
         const timedOut = error instanceof DOMException && error.name === "AbortError";
@@ -559,49 +566,40 @@ serve(async (req) => {
       }
     };
 
-    // Flash reads handwriting; Lite mostly cannot. In Nov 2026 Google's Flash
-    // models were overloaded for days: the newest answered "high demand" or
-    // hung, and asking them one after the other made a bill wait 45 s per
-    // hung model. So both Flash models are asked at the same moment (the
-    // account pays per request, two Flash reads cost a few paise) and the
-    // first one with lines wins; Lite gets the photo only if both fail.
-    // Every request is paid for: asking both Flash models at once cost about
-    // ₹3.6 a bill (₹91 for ~25 test scans on 13 Nov 2026). So one Flash reads
-    // the bill (9-17 s normally); only if it has not answered in 15 s, or
-    // fails sooner, is the other Flash asked too, and the first answer wins.
-    // Low thinking would be faster but read 7-8 of 11 handwritten lines.
-    // 15 + 70 + 25 s stays inside the app's 120 s wait.
+    // One Google read per bill. The Flash that has read every bill since
+    // October goes first (on the free key when there is one, else paid); a
+    // second Flash is asked only if that read fails, and Lite last. Asking a
+    // second Flash after 15 s regardless had nearly doubled the Google bill
+    // (about Rs 3.6 a bill, Nov 2026). Medium thinking stays: low read only
+    // 7-8 of 11 handwritten lines.
     const geminiRead = (async (): Promise<Record<string, unknown>> => {
       const found = await pickModels(geminiKey);
-      if (found.length > 2) {
-        const first = askGemini({ ...found[1], timeoutMs: 85_000 });
-        const backup = new Promise<Record<string, unknown>>((resolve, reject) => {
-          let started = false;
-          const start = () => {
-            if (started) return;
-            started = true;
-            askGemini({ ...found[0], timeoutMs: 70_000 }).then(resolve, reject);
-          };
-          const timer = setTimeout(start, 15_000);
-          first.then(() => { clearTimeout(timer); if (!started) reject(new Error("not needed")); },
-                     () => { clearTimeout(timer); start(); });
-        });
-        try {
-          return await Promise.any([first, backup]);
-        } catch {
-          return await askGemini({ ...found[2], timeoutMs: 25_000 });
-        }
+      const main = found.length > 2 ? found[1] : found[0];
+      const other = found.length > 2 ? found[0] : (found[1] || found[0]);
+      const lite = found.length > 2 ? found[2] : null;
+      if (freeKey) {
+        try { return await askGemini({ ...main, timeoutMs: 30_000 }, freeKey); } catch { /* paid key next */ }
       }
-      try {
-        return await askGemini({ ...found[0], timeoutMs: 70_000 });
-      } catch {
-        return await askGemini({ ...(found[1] || found[0]), timeoutMs: 40_000 });
+      try { return await askGemini({ ...main, timeoutMs: freeKey ? 40_000 : 60_000 }); } catch { /* next */ }
+      if (other.name !== main.name) {
+        try { return await askGemini({ ...other, timeoutMs: 30_000 }); } catch { /* next */ }
       }
+      if (lite) return await askGemini({ ...lite, timeoutMs: 20_000 });
+      throw new Error(lastError);
     })();
+    geminiRead.catch(() => {});
 
-    // Whichever reader brings back lines first is the answer.
+    // Claude joins only if Google is slow (25 s) or has failed.
+    const claudeRead = new Promise<Record<string, unknown>>((resolve, reject) => {
+      let started = false;
+      const start = () => { if (started) return; started = true; readClaude().then(resolve, reject); };
+      const timer = setTimeout(start, 25_000);
+      geminiRead.then(() => { clearTimeout(timer); if (!started) reject(new Error("not needed")); },
+                      () => { clearTimeout(timer); start(); });
+    });
+
     try {
-      parsed = await Promise.any([claudeRead, geminiRead]);
+      parsed = await Promise.any([geminiRead, claudeRead]);
     } catch {
       parsed = null;
       if (claudeError) lastError = `${lastError} | ${claudeError}`;

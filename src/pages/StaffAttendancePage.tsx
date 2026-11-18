@@ -40,6 +40,18 @@ const fmt12 = (hhmm?: string | null) => {
 };
 const mins = (n: number) => n >= 60 ? `${Math.floor(n / 60)} ghante ${n % 60} min` : `${n} min`;
 
+const isIphone = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
+// What to do about a GPS problem, said for the phone in hand.
+const PERMISSION_HELP = () => isIphone()
+  ? "Location ki permission band hai. iPhone: Settings → Privacy → Location Services → Safari (ya Chrome) → “While Using” chuno aur Precise Location ON karo. Phir page dobara kholo."
+  : "Location ki permission band hai. Browser mein address ke paas taala (🔒) dabao → Permissions → Location → Allow. Phone ki Location bhi ON rakho.";
+const COARSE_HELP = () => isIphone()
+  ? "Phone sirf andaze wali location de raha hai. iPhone: Settings → Privacy → Location Services → Safari (ya Chrome) → Precise Location ON karo."
+  : "Phone sirf andaze wali location de raha hai. Settings → Location → Google Location Accuracy ON karo, aur Wi-Fi ON rakho (connect zaroori nahi).";
+const WEAK_HELP = "GPS kamzor hai. Khidki ya darwaze ke paas aakar 10-20 second ruko, phir dobara try karo.";
+// A reading this far off means the phone gave only its rough location.
+const COARSE_M = 500;
+
 // Attendance counts only inside the canteen, so the reading must be sharp.
 // The first GPS fix is often 50-100 m off; keep listening for up to 15 s and
 // use the best one, stopping early once it is within 15 m.
@@ -51,18 +63,42 @@ export function getBestLocation(goodEnoughM = 15, maxWaitMs = 15000): Promise<Ge
     const finish = (err?: Error) => {
       if (done) return; done = true;
       navigator.geolocation.clearWatch(id); clearTimeout(timer);
-      if (best) resolve(best); else reject(err || new Error("Location nahi mili. GPS on karke dobara try karo"));
+      if (best) resolve(best); else reject(err || new Error("Location nahi mili. Phone ki Location ON karo. " + WEAK_HELP));
     };
     const id = navigator.geolocation.watchPosition((pos) => {
       if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
       if (pos.coords.accuracy <= goodEnoughM) finish();
     }, (e) => {
-      if (e.code === 1) finish(new Error("Location ki permission do (browser settings → Location → Allow)"));
+      if (e.code === 1) finish(new Error(PERMISSION_HELP()));
     }, { enableHighAccuracy: true, maximumAge: 0, timeout: maxWaitMs });
     const timer = setTimeout(() => finish(), maxWaitMs);
   });
 }
-const getLocation = () => getBestLocation();
+const getLocation = () => getBestLocation(15, 25000);
+
+// GPS starts as soon as the attendance screen is open, so by the time the
+// button is tapped the phone has usually settled on a sharp reading. The
+// screen shows how sharp it is, and the punch uses it if it is fresh.
+type Gps = { pos: GeolocationPosition | null; error: string };
+function useWarmGps(active: boolean) {
+  const [gps, setGps] = useState<Gps>({ pos: null, error: "" });
+  useEffect(() => {
+    if (!active) return;
+    if (!navigator.geolocation) { setGps({ pos: null, error: "Is phone mein location nahi hai" }); return; }
+    const id = navigator.geolocation.watchPosition(
+      (pos) => setGps((g) => {
+        const prev = g.pos;
+        // keep a sharper reading for up to 30 s rather than a blurrier new one
+        const keep = prev && prev.coords.accuracy < pos.coords.accuracy && pos.timestamp - prev.timestamp < 30_000;
+        return { pos: keep ? prev : pos, error: "" };
+      }),
+      (e) => setGps((g) => ({ ...g, error: e.code === 1 ? PERMISSION_HELP() : g.pos ? "" : WEAK_HELP })),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 30_000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, [active]);
+  return gps;
+}
 
 export default function StaffAttendancePage() {
   const [token, setToken] = useState(readToken);
@@ -78,6 +114,9 @@ export default function StaffAttendancePage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const kindRef = useRef<"in" | "out">("in");
   const locRef = useRef<Promise<GeolocationPosition> | null>(null);
+  const gps = useWarmGps(!!me);
+  const gpsRef = useRef(gps);
+  gpsRef.current = gps;
 
   useEffect(() => { document.title = "Staff Attendance"; }, []);
 
@@ -110,7 +149,10 @@ export default function StaffAttendancePage() {
   const start = (kind: "in" | "out") => {
     setError(""); setDone("");
     kindRef.current = kind;
-    locRef.current = getLocation();
+    const warm = gpsRef.current.pos;
+    locRef.current = warm && warm.coords.accuracy <= 25 && Date.now() - warm.timestamp < 60_000
+      ? Promise.resolve(warm)
+      : getLocation();
     locRef.current.catch(() => {});
     fileRef.current?.click();
   };
@@ -122,6 +164,7 @@ export default function StaffAttendancePage() {
     setBusy(kind);
     try {
       const pos = await (locRef.current || getLocation());
+      if (pos.coords.accuracy > COARSE_M) throw new Error(COARSE_HELP());
       const { base64, mimeType } = await toCompressedBase64(file, 900);
       const d = await call({
         action: "punch", ...auth, kind,
@@ -215,6 +258,8 @@ export default function StaffAttendancePage() {
               </p>
             )}
 
+            {(canIn || canOut) && me.location_set && <GpsLine gps={gps} />}
+
             {canIn && (
               <Button className="h-20 w-full text-xl" disabled={!!busy} onClick={() => start("in")}>
                 {busy === "in" ? "Lag rahi hai…" : <><LogIn className="mr-2 h-6 w-6" /> Aaya (attendance lagao)</>}
@@ -243,5 +288,20 @@ export default function StaffAttendancePage() {
         )}
       </div>
     </div>
+  );
+}
+
+function GpsLine({ gps }: { gps: Gps }) {
+  const acc = gps.pos ? Math.round(gps.pos.coords.accuracy) : null;
+  const [tone, text] = gps.error && acc == null ? ["text-destructive", gps.error]
+    : acc == null ? ["text-muted-foreground", "GPS dhoondh raha hai… 10-20 second ruko"]
+    : acc > COARSE_M ? ["text-destructive", COARSE_HELP()]
+    : acc > 50 ? ["text-warning", `GPS abhi ${acc} m tak galat hai. ${WEAK_HELP}`]
+    : acc > 25 ? ["text-warning", `GPS ${acc} m · thoda ruko, aur saaf ho raha hai`]
+    : ["text-success", `GPS theek hai (${acc} m) · ab attendance lagao`];
+  return (
+    <p className={`flex items-start gap-1 rounded-md bg-muted/40 p-2 text-sm font-medium ${tone}`}>
+      <MapPin className="mt-0.5 h-4 w-4 shrink-0" /> <span>{text}</span>
+    </p>
   );
 }
